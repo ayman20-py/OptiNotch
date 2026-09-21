@@ -1,46 +1,37 @@
-use floem::{ 
-    Application, IntoView, peniko::Color, reactive::create_effect, views::{ Decorators, container }, window::WindowConfig
+mod render;
+mod window;
+
+use window::NotchWindow;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    DispatchMessageW, GetMessageW, TranslateMessage, MSG,
 };
-
-mod notch_config;
-use crate::notch_config::{calculate_notch_layout, enable_smooth_transparency};
-
-fn app_view() -> impl IntoView {
-    create_effect(move |_| {
-        enable_smooth_transparency();
-    });
-
-    let notch_content = (
-        "Welcome to OptiNotch",
-    );
-
-    container(notch_content)
-        .style(|s| { 
-            s.width_full()
-                .height_full()
-                .background(Color::rgb8(24, 24, 27))
-                .color(Color::WHITE)
-                .border_radius(14.0)
-                .items_center()
-                .justify_center()
-        })
-}
+use windows_sys::Win32::UI::HiDpi::{ SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 };
 
 fn main() {
-    let (notch_w, notch_h, position) = calculate_notch_layout();
+    // To prevent the automatic scalling of the notch due to winodws scalling
+    unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
 
-    let window_conf = WindowConfig::default()
-        .size((notch_w, notch_h))
-        .title("OptiNotch")
-        .resizable(false)
-        .position(position)
-        .window_level(floem::window::WindowLevel::AlwaysOnTop)
-        .undecorated(true)
-        .with_transparent(true)
-        .undecorated_shadow(false)
-        .show_titlebar(false);
+    let compact_width = 150;
+    let compact_height = 58;
+    let top_padding = 6; // 6px from the top edge of screen
 
-    Application::new()
-        .window(move |_| app_view(), Some(window_conf))
-        .run();
+    let mut notch = NotchWindow::new(compact_width, compact_height, top_padding);
+
+    // Initial Render using Skia
+    notch.render(|canvas| {
+        render::draw_notch(canvas, compact_width as f32, compact_height as f32);
+    });
+
+    println!("OptiNotch running! Look at the top center of your screen.");
+
+    // Win32 Message Loop
+    unsafe {
+        let mut msg: MSG = std::mem::zeroed();
+        while GetMessageW(&mut msg, 0 as _, 0, 0) > 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
 }
