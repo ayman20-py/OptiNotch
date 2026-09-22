@@ -1,15 +1,20 @@
 use std::ffi::c_void;
 use std::ptr::null;
+use std::sync::atomic::{AtomicBool, Ordering};
 use skia_safe::{surfaces, AlphaType, Canvas, ColorType, ImageInfo};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+use super::state::NotchController;
+
+static CLICKED_FLAG: AtomicBool = AtomicBool::new(false);
+
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-unsafe extern "system" fn wnd_proc(
+pub unsafe extern "system" fn wnd_proc(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
@@ -20,6 +25,41 @@ unsafe extern "system" fn wnd_proc(
             unsafe { PostQuitMessage(0) };
             0
         }
+
+        // Click detection
+        WM_LBUTTONUP => {
+            CLICKED_FLAG.store(true, Ordering::SeqCst);
+            0
+        }
+
+        // Dynamic Click-Through Hit Testing
+        WM_NCHITTEST => {
+            let controller_ptr = unsafe {
+                GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const NotchController
+            };
+
+            if !controller_ptr.is_null() {
+                let controller = unsafe { &*controller_ptr };
+
+                let screen_x = (lparam & 0xFFFF) as i16 as i32;
+                let screen_y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+
+                let mut rect: RECT = unsafe { std::mem::zeroed() };
+                unsafe { GetWindowRect(hwnd, &mut rect) };
+
+                let local_x = (screen_x - rect.left) as f32;
+                let local_y = (screen_y - rect.top) as f32;
+
+                if controller.is_inside_pill(local_x, local_y) {
+                    return HTCLIENT as LRESULT;
+                } else {
+                    return HTTRANSPARENT as LRESULT;
+                }
+            }
+
+            HTCLIENT as LRESULT
+        }
+
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }
@@ -36,9 +76,13 @@ pub struct NotchWindow {
 }
 
 impl NotchWindow {
-    pub fn new(width: i32, height: i32, top_padding: i32) -> Self {
+    pub fn new(controller: &mut NotchController) -> Self {
+        let width = controller.config.canvas_width.round() as i32;
+        let height = controller.config.canvas_height.round() as i32;
+        let top_padding = controller.config.top_padding.round() as i32;
+
         unsafe {
-            let class_name = to_wide("optinotch");
+            let class_name = to_wide("OptiNotchClass");
             let window_title = to_wide("OptiNotch");
 
             let wnd_class = WNDCLASSEXW {
@@ -50,7 +94,7 @@ impl NotchWindow {
                 hInstance: 0 as _,
                 hIcon: 0 as _,
                 hCursor: LoadCursorW(0 as _, IDC_ARROW),
-                hbrBackground: 0 as _, // Transparent layered window
+                hbrBackground: 0 as _,
                 lpszMenuName: null(),
                 lpszClassName: class_name.as_ptr(),
                 hIconSm: 0 as _,
@@ -78,20 +122,23 @@ impl NotchWindow {
             );
 
             if hwnd == 0 as _ {
-                panic!("[!] Failed to create window");
+                panic!("[!] Failed to create OptiNotch window");
             }
 
-            // 1. Create In-Memory Device Context
+            // Bind controller pointer to window for WM_NCHITTEST
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, controller as *mut NotchController as isize);
+
+            // Create Memory DC
             let hdc_screen = GetDC(0 as _);
             let hdc_mem = CreateCompatibleDC(hdc_screen);
             ReleaseDC(0 as _, hdc_screen);
 
-            // 2. Setup 32-bit BGRA Top-Down DIB
+            // 32-bit Top-down BGRA DIB
             let bmi = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
                     biWidth: width,
-                    biHeight: -height, // Negative = top-down
+                    biHeight: -height,
                     biPlanes: 1,
                     biBitCount: 32,
                     biCompression: BI_RGB,
@@ -119,10 +166,6 @@ impl NotchWindow {
                 0,
             );
 
-            if hbitmap == 0 as _ || pixel_ptr.is_null() {
-                panic!("[!] Failed to create DIB section");
-            }
-
             SelectObject(hdc_mem, hbitmap);
 
             Self {
@@ -136,6 +179,11 @@ impl NotchWindow {
                 y,
             }
         }
+    }
+
+    /// Check if the user clicked the notch
+    pub fn check_clicked(&self) -> bool {
+        CLICKED_FLAG.swap(false, Ordering::SeqCst)
     }
 
     pub fn render<F>(&mut self, draw_fn: F)
@@ -161,12 +209,10 @@ impl NotchWindow {
             row_bytes,
             None,
         )
-        .expect("[!] Failed to wrap Skia surface");
+        .expect("[!] Failed to create Skia surface");
 
-        // Execute drawing closure on Skia canvas
         draw_fn(surface.canvas());
 
-        // Push pixels to Windows Desktop Window Manager (DWM)
         unsafe {
             let blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
