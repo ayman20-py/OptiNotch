@@ -7,8 +7,11 @@ use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::state::NotchController;
+use super::tray::{IDM_EXIT, IDM_TOGGLE, WM_TRAY_ICON};
 
 static CLICKED_FLAG: AtomicBool = AtomicBool::new(false);
+static SHOW_TRAY_MENU_FLAG: AtomicBool = AtomicBool::new(false);
+static EXIT_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -26,9 +29,32 @@ pub unsafe extern "system" fn wnd_proc(
             0
         }
 
-        // Click detection
+        // Notch direct click
         WM_LBUTTONUP => {
             CLICKED_FLAG.store(true, Ordering::SeqCst);
+            0
+        }
+
+        // Tray Icon events
+        WM_TRAY_ICON => {
+            let event = lparam as u32;
+            if event == WM_RBUTTONUP {
+                SHOW_TRAY_MENU_FLAG.store(true, Ordering::SeqCst);
+            } else if event == WM_LBUTTONUP {
+                CLICKED_FLAG.store(true, Ordering::SeqCst);
+            }
+            0
+        }
+
+        // Context menu commands
+        WM_COMMAND => {
+            let cmd_id = (wparam & 0xFFFF) as usize;
+            if cmd_id == IDM_TOGGLE {
+                CLICKED_FLAG.store(true, Ordering::SeqCst);
+            } else if cmd_id == IDM_EXIT {
+                EXIT_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                unsafe { DestroyWindow(hwnd) };
+            }
             0
         }
 
@@ -92,7 +118,7 @@ impl NotchWindow {
                 cbClsExtra: 0,
                 cbWndExtra: 0,
                 hInstance: 0 as _,
-                hIcon: 0 as _,
+                hIcon: LoadIconW(0 as _, IDI_APPLICATION),
                 hCursor: LoadCursorW(0 as _, IDC_ARROW),
                 hbrBackground: 0 as _,
                 lpszMenuName: null(),
@@ -181,9 +207,19 @@ impl NotchWindow {
         }
     }
 
-    /// Check if the user clicked the notch
+    /// Check if user clicked the notch
     pub fn check_clicked(&self) -> bool {
         CLICKED_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    /// Check if right-clicked tray icon
+    pub fn check_show_tray_menu(&self) -> bool {
+        SHOW_TRAY_MENU_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    /// Check if user selected exit from tray menu
+    pub fn check_exit_requested(&self) -> bool {
+        EXIT_REQUESTED_FLAG.load(Ordering::SeqCst)
     }
 
     pub fn render<F>(&mut self, draw_fn: F)

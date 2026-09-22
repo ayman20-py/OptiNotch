@@ -15,4 +15,5 @@ windows-sys = { version = ">=0.59, <=0.61", features = [
     "Win32_Security",
     "Win32_UI_HiDpi",
     "Win32_System_SystemInformation",
+    "Win32_UI_Shell",
 ] }

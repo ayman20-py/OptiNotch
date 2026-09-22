@@ -56,7 +56,7 @@ impl ClockUI {
     }
 
     /// Query current local time formatted as "HH:MM"
-    pub fn get_time_string(&self) -> String {
+    fn get_time_string(&self) -> String {
         unsafe {
             let mut st: SYSTEMTIME = std::mem::zeroed();
             GetLocalTime(&mut st);
@@ -65,7 +65,7 @@ impl ClockUI {
     }
 
     /// Query current date string (e.g. "Tuesday, September 22")
-    pub fn get_date_string(&self) -> String {
+    fn get_date_string(&self) -> String {
         unsafe {
             let mut st: SYSTEMTIME = std::mem::zeroed();
             GetLocalTime(&mut st);

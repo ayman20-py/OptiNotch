@@ -3,7 +3,7 @@ mod ui;
 mod window;
 
 use ui::clock::ClockUI;
-use window::{NotchConfig, NotchController, NotchWindow};
+use window::{NotchConfig, NotchController, NotchWindow, TrayIcon};
 use windows_sys::Win32::Graphics::Dwm::DwmFlush;
 use windows_sys::Win32::UI::HiDpi::{
     GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -24,50 +24,59 @@ fn main() {
     let dpi = unsafe { GetDpiForSystem() } as f32;
     let scale_factor = dpi / 96.0;
 
-    // 2. Setup Config, Spring Controller, and Layered Window
+    // 2. Setup Config, Controller, Window, and Clock UI
     let config = NotchConfig::new(scale_factor);
     let mut controller = NotchController::new(config);
     let mut notch = NotchWindow::new(&mut controller);
     let clock_ui = ClockUI::new(scale_factor);
 
-    // 3. Start 1-second clock timer
+    // 3. Register System Tray Icon
+    let tray = TrayIcon::new(notch.hwnd, 100, "OptiNotch - Click to toggle");
+
+    // 4. Start 1-second clock timer
     unsafe {
         SetTimer(notch.hwnd, TIMER_CLOCK_ID, 1000, None);
     }
 
-    // 4. Initial Render
+    // 5. Initial Render
     let canvas_w = controller.config.canvas_width;
     let canvas_h = controller.config.canvas_height;
     notch.render(|canvas| {
         render::draw_notch(canvas, canvas_w, canvas_h, &controller, &clock_ui);
     });
 
-    println!("OptiNotch running! (Synced to display refresh rate via DwmFlush)");
+    println!("OptiNotch running! System tray icon active.");
 
-    // 5. Main Event Loop with Hardware VSync (120Hz+)
+    // 6. Main Event Loop with Hardware VSync
     unsafe {
         let mut msg: MSG = std::mem::zeroed();
 
         'main_loop: loop {
-            // Check if user clicked the notch
+            // Check for exit command from tray menu
+            if notch.check_exit_requested() {
+                break 'main_loop;
+            }
+
+            // Check if user clicked the notch or left-clicked tray icon
             if notch.check_clicked() {
                 controller.toggle_state();
             }
 
+            // Check if user right-clicked tray icon -> show context menu
+            if notch.check_show_tray_menu() {
+                tray.show_context_menu();
+            }
+
             if controller.is_animating {
                 // ============================================================
-                // HIGH REFRESH RATE ANIMATION LOOP (120Hz / 144Hz / 240Hz)
+                // HIGH REFRESH RATE ANIMATION LOOP (120Hz VSync)
                 // ============================================================
-
-                // 1. Step spring physics
                 controller.step_animation();
 
-                // 2. Render frame with Skia
                 notch.render(|canvas| {
                     render::draw_notch(canvas, canvas_w, canvas_h, &controller, &clock_ui);
                 });
 
-                // 3. Drain all pending Win32 messages without blocking
                 while PeekMessageW(&mut msg, 0 as _, 0, 0, PM_REMOVE) != 0 {
                     if msg.message == WM_QUIT {
                         break 'main_loop;
@@ -76,8 +85,6 @@ fn main() {
                     DispatchMessageW(&msg);
                 }
 
-                // 4. SYNC WITH HARDWARE VSYNC via DWM Compositor:
-                // DwmFlush blocks until the exact monitor refresh interval (8.33ms for 120Hz)
                 DwmFlush();
             } else {
                 // ============================================================
@@ -90,7 +97,6 @@ fn main() {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
 
-                // Handle 1-second clock updates
                 if msg.message == WM_TIMER && msg.wParam == TIMER_CLOCK_ID {
                     notch.render(|canvas| {
                         render::draw_notch(canvas, canvas_w, canvas_h, &controller, &clock_ui);
