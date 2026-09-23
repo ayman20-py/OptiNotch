@@ -1,5 +1,6 @@
 use crate::media::{
-    MediaInfo, draw_album_art, draw_media_info, draw_playback_controls, draw_progress_bar,
+    MediaInfo, MediaLayout, draw_album_art, draw_media_info, draw_playback_controls,
+    draw_progress_bar,
 };
 use crate::ui::clock::ClockUI;
 use crate::window::NotchController;
@@ -59,53 +60,129 @@ pub fn draw_notch(
         // Expanded View (Clock & Date)
         clock_ui.draw_expanded(canvas, pill_x, pill_y, current_w, current_h);
 
+        let scale = controller.config.scale_factor;
+
+        // Draw Monitor Switch Button (Header Top-Right)
+        let mon_cx = pill_x + current_w - (25.0 * scale);
+        let mon_cy = pill_y + (24.0 * scale);
+        let mon_scale = controller.btn_anims.monitor_scale.current;
+
+        draw_monitor_button(
+            canvas,
+            mon_cx,
+            mon_cy,
+            mon_scale,
+            scale,
+            controller.current_monitor,
+        );
+
         // Media Widget (when media is detected)
         if media_info.has_media {
-            let scale = controller.config.scale_factor;
-            let art_size = 70.0 * scale;
-            let art_x = pill_x + (current_w * 0.05);
-            let art_y = pill_y + (current_h - art_size) / 1.6;
+            let layout = MediaLayout::compute(pill_x, pill_y, current_w, current_h, scale);
 
-            // Draw Album Art (Preserving user position)
-            draw_album_art(canvas, album_art, art_x, art_y, art_size);
+            // Draw Album Art
+            draw_album_art(canvas, album_art, layout.art_rect);
 
-            // Draw Track Title & Artist (Preserving user position)
-            let info_x = art_x + (art_size * 1.15);
-            let info_y = art_y + (art_size * 0.02);
-            let max_w = pill_x + current_w - info_x - (20.0 * scale);
+            // Draw Track Title & Artist
+            let max_w = (pill_x + (current_w * 0.55) - layout.info_x - (10.0 * scale)).max(60.0 * scale);
             draw_media_info(
                 canvas,
                 &media_info.title,
                 &media_info.artist,
-                info_x,
-                info_y,
+                layout.info_x,
+                layout.info_y,
                 max_w,
                 scale,
             );
 
             // Draw Media Progress Bar
-            let bar_y = info_y + (47.0 * scale);
-            let bar_w = (160.0 * scale).min(max_w);
             draw_progress_bar(
                 canvas,
-                info_x,
-                bar_y,
-                bar_w,
+                layout.bar_rect,
                 media_info.position_secs,
                 media_info.duration_secs,
                 scale,
             );
 
-            // Draw Playback Controls (Previous, Play/Pause, Next)
-            let controls_cx = info_x + bar_w / 2.0;
-            let controls_cy = bar_y + (30.0 * scale);
-            draw_playback_controls(
-                canvas,
-                controls_cx,
-                controls_cy,
-                media_info.is_playing,
-                scale,
-            );
+            // Draw Playback Controls
+            draw_playback_controls(canvas, &layout, &controller.btn_anims, scale);
         }
     }
+}
+
+fn draw_monitor_button(
+    canvas: &Canvas,
+    cx: f32,
+    cy: f32,
+    scale: f32,
+    scale_factor: f32,
+    current_monitor: usize,
+) {
+    canvas.save();
+    canvas.translate((cx, cy));
+    canvas.scale((scale, scale));
+
+    let s = scale_factor;
+
+    // 1. Subtle glass hover backdrop
+    let mut bg_paint = Paint::default();
+    bg_paint.set_anti_alias(true);
+    bg_paint.set_color(Color::from_argb(25, 255, 255, 255));
+    let pill_w = 30.0 * s;
+    let pill_h = 22.0 * s;
+    let pill_rect = Rect::from_xywh(-pill_w / 2.0, -pill_h / 2.0, pill_w, pill_h);
+    let pill_rrect = RRect::new_rect_xy(pill_rect, 6.0 * s, 6.0 * s);
+    canvas.draw_rrect(pill_rrect, &bg_paint);
+
+    let mut border_paint = Paint::default();
+    border_paint.set_anti_alias(true);
+    border_paint.set_style(PaintStyle::Stroke);
+    border_paint.set_stroke_width(1.0);
+    border_paint.set_color(Color::from_argb(40, 255, 255, 255));
+    canvas.draw_rrect(pill_rrect, &border_paint);
+
+    // 2. Monitor Screen Vector
+    let mut screen_paint = Paint::default();
+    screen_paint.set_anti_alias(true);
+    screen_paint.set_style(PaintStyle::Stroke);
+    screen_paint.set_stroke_width(1.2 * s);
+    screen_paint.set_color(Color::from_argb(230, 255, 255, 255));
+
+    let screen_w = 14.0 * s;
+    let screen_h = 9.5 * s;
+    let screen_rect = Rect::from_xywh(-screen_w / 2.0 - (4.0 * s), -screen_h / 2.0 - (1.0 * s), screen_w, screen_h);
+    let screen_rrect = RRect::new_rect_xy(screen_rect, 1.5 * s, 1.5 * s);
+    canvas.draw_rrect(screen_rrect, &screen_paint);
+
+    // Stand neck & base
+    let neck_x = -4.0 * s;
+    let neck_top = screen_rect.bottom;
+    let neck_bot = neck_top + (2.0 * s);
+    canvas.draw_line((neck_x, neck_top), (neck_x, neck_bot), &screen_paint);
+    canvas.draw_line((neck_x - 3.0 * s, neck_bot), (neck_x + 3.0 * s, neck_bot), &screen_paint);
+
+    // 3. Monitor number text (e.g. "1", "2")
+    let font_mgr = skia_safe::FontMgr::new();
+    let typeface = font_mgr
+        .match_family_style("Lilita One", skia_safe::FontStyle::normal())
+        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", skia_safe::FontStyle::normal()))
+        .or_else(|| font_mgr.legacy_make_typeface(None, skia_safe::FontStyle::normal()))
+        .expect("Failed to load font for monitor button");
+
+    let mut num_font = skia_safe::Font::new(typeface, 9.5 * s);
+    num_font.set_subpixel(true);
+    num_font.set_edging(skia_safe::font::Edging::SubpixelAntiAlias);
+
+    let mut num_paint = Paint::default();
+    num_paint.set_anti_alias(true);
+    num_paint.set_color(Color::from_argb(240, 255, 255, 255));
+
+    let num_str = (current_monitor + 1).to_string();
+    let (num_w, _) = num_font.measure_str(&num_str, Some(&num_paint));
+    let (_, num_metrics) = num_font.metrics();
+    let num_x = 6.0 * s - (num_w / 2.0);
+    let num_y = -num_metrics.ascent / 2.0 - (1.0 * s);
+    canvas.draw_str(&num_str, (num_x, num_y), &num_font, &num_paint);
+
+    canvas.restore();
 }

@@ -16,12 +16,73 @@ static EXIT_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 static MEDIA_TOGGLE_FLAG: AtomicBool = AtomicBool::new(false);
 static MEDIA_NEXT_FLAG: AtomicBool = AtomicBool::new(false);
 static MEDIA_PREV_FLAG: AtomicBool = AtomicBool::new(false);
+static SWITCH_MONITOR_FLAG: AtomicBool = AtomicBool::new(false);
 
 static mut ACTIVE_CONTROLLER_PTR: usize = 0;
 static mut ACTIVE_WINDOW_HWND: HWND = 0 as _;
 static mut ACTIVE_WINDOW_X: i32 = 0;
 static mut ACTIVE_WINDOW_Y: i32 = 0;
 static mut MOUSE_HOOK: HHOOK = 0 as _;
+
+#[derive(Clone, Copy)]
+pub struct MonitorDevice {
+    pub _hmonitor: HMONITOR,
+    pub rect: RECT,
+    pub is_primary: bool,
+}
+
+unsafe extern "system" fn monitor_enum_proc(
+    hmonitor: HMONITOR,
+    _hdc: HDC,
+    _lprc: *mut RECT,
+    lparam: LPARAM,
+) -> i32 {
+    unsafe {
+        let monitors = &mut *(lparam as *mut Vec<MonitorDevice>);
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+
+        if GetMonitorInfoW(hmonitor, &mut info) != 0 {
+            let is_primary = (info.dwFlags & 1) != 0;
+            monitors.push(MonitorDevice {
+                _hmonitor: hmonitor,
+                rect: info.rcMonitor,
+                is_primary,
+            });
+        }
+    }
+    1
+}
+
+pub fn get_all_monitors() -> Vec<MonitorDevice> {
+    let mut monitors: Vec<MonitorDevice> = Vec::new();
+    unsafe {
+        EnumDisplayMonitors(
+            0 as _,
+            std::ptr::null(),
+            Some(monitor_enum_proc),
+            &mut monitors as *mut Vec<MonitorDevice> as LPARAM,
+        );
+    }
+    monitors.sort_by_key(|m| if m.is_primary { 0 } else { 1 });
+    if monitors.is_empty() {
+        unsafe {
+            let w = GetSystemMetrics(SM_CXSCREEN);
+            let h = GetSystemMetrics(SM_CYSCREEN);
+            monitors.push(MonitorDevice {
+                _hmonitor: 0 as _,
+                rect: RECT {
+                    left: 0,
+                    top: 0,
+                    right: w,
+                    bottom: h,
+                },
+                is_primary: true,
+            });
+        }
+    }
+    monitors
+}
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -81,9 +142,15 @@ pub unsafe extern "system" fn wnd_proc(
                     // Click on compact pill expands it
                     EXPAND_REQUESTED_FLAG.store(true, Ordering::SeqCst);
                 } else if controller.state == NotchState::Expanded {
-                    // In expanded mode: check if user clicked a media control button!
-                    let local_x = (lparam & 0xFFFF) as i16 as f32;
-                    let local_y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+                    // Use exact screen-to-window coordinate math for subpixel accuracy
+                    let mut pt: POINT = unsafe { std::mem::zeroed() };
+                    unsafe { GetCursorPos(&mut pt) };
+
+                    let mut rect: RECT = unsafe { std::mem::zeroed() };
+                    unsafe { GetWindowRect(hwnd, &mut rect) };
+
+                    let local_x = (pt.x - rect.left) as f32;
+                    let local_y = (pt.y - rect.top) as f32;
 
                     match controller.check_media_click(local_x, local_y) {
                         MediaAction::TogglePlayPause => {
@@ -94,6 +161,9 @@ pub unsafe extern "system" fn wnd_proc(
                         }
                         MediaAction::SkipPrevious => {
                             MEDIA_PREV_FLAG.store(true, Ordering::SeqCst);
+                        }
+                        MediaAction::SwitchMonitor => {
+                            SWITCH_MONITOR_FLAG.store(true, Ordering::SeqCst);
                         }
                         MediaAction::None => {}
                     }
@@ -186,6 +256,9 @@ pub struct NotchWindow {
     pub height: i32,
     pub x: i32,
     pub y: i32,
+    pub top_padding: i32,
+    pub monitors: Vec<MonitorDevice>,
+    pub current_monitor_index: usize,
 }
 
 impl NotchWindow {
@@ -193,6 +266,17 @@ impl NotchWindow {
         let width = controller.config.canvas_width.round() as i32;
         let height = controller.config.canvas_height.round() as i32;
         let top_padding = controller.config.top_padding.round() as i32;
+
+        let monitors = get_all_monitors();
+        let current_monitor_index = 0;
+
+        let primary_mon = &monitors[0];
+        let mon_w = primary_mon.rect.right - primary_mon.rect.left;
+        let x = primary_mon.rect.left + (mon_w - width) / 2;
+        let y = primary_mon.rect.top + top_padding;
+
+        controller.current_monitor = 0;
+        controller.total_monitors = monitors.len();
 
         unsafe {
             let class_name = to_wide("OptiNotchClass");
@@ -214,10 +298,6 @@ impl NotchWindow {
             };
 
             RegisterClassExW(&wnd_class);
-
-            let screen_width = GetSystemMetrics(SM_CXSCREEN);
-            let x = (screen_width - width) / 2;
-            let y = top_padding;
 
             let hwnd = CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
@@ -303,6 +383,9 @@ impl NotchWindow {
                 height,
                 x,
                 y,
+                top_padding,
+                monitors,
+                current_monitor_index,
             }
         }
     }
@@ -333,6 +416,127 @@ impl NotchWindow {
 
     pub fn check_media_prev(&self) -> bool {
         MEDIA_PREV_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    pub fn check_switch_monitor(&self) -> bool {
+        SWITCH_MONITOR_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    pub fn resize_surface(&mut self, new_w: i32, new_h: i32) {
+        if self.width == new_w && self.height == new_h && !self.pixel_ptr.is_null() {
+            return;
+        }
+
+        self.width = new_w;
+        self.height = new_h;
+
+        unsafe {
+            if self.hbitmap != 0 as _ {
+                DeleteObject(self.hbitmap);
+            }
+
+            let bmi = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: new_w,
+                    biHeight: -new_h,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB,
+                    biSizeImage: 0,
+                    biXPelsPerMeter: 0,
+                    biYPelsPerMeter: 0,
+                    biClrUsed: 0,
+                    biClrImportant: 0,
+                },
+                bmiColors: [RGBQUAD {
+                    rgbBlue: 0,
+                    rgbGreen: 0,
+                    rgbRed: 0,
+                    rgbReserved: 0,
+                }],
+            };
+
+            let mut pixel_ptr: *mut c_void = std::ptr::null_mut();
+            self.hbitmap = CreateDIBSection(
+                self.hdc_mem,
+                &bmi,
+                DIB_RGB_COLORS,
+                &mut pixel_ptr,
+                0 as _,
+                0,
+            );
+            self.pixel_ptr = pixel_ptr;
+
+            SelectObject(self.hdc_mem, self.hbitmap);
+        }
+    }
+
+    pub fn switch_to_next_monitor(&mut self, controller: &mut NotchController) -> f32 {
+        self.monitors = get_all_monitors();
+        if self.monitors.is_empty() {
+            return controller.config.scale_factor;
+        }
+        self.current_monitor_index = (self.current_monitor_index + 1) % self.monitors.len();
+        let mon = self.monitors[self.current_monitor_index];
+        let mon_w = mon.rect.right - mon.rect.left;
+
+        // 1. Move window to the target display first
+        let initial_x = mon.rect.left + (mon_w - self.width) / 2;
+        let initial_y = mon.rect.top + self.top_padding;
+
+        unsafe {
+            SetWindowPos(
+                self.hwnd,
+                0 as _,
+                initial_x,
+                initial_y,
+                self.width,
+                self.height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+
+        // 2. Query target monitor DPI
+        let dpi = unsafe {
+            windows_sys::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd)
+        } as f32;
+        let scale_factor = if dpi > 0.0 { dpi / 96.0 } else { 1.0 };
+
+        // 3. Update controller config & dimensions
+        controller.update_scale(scale_factor);
+        controller.current_monitor = self.current_monitor_index;
+        controller.total_monitors = self.monitors.len();
+
+        let new_w = controller.config.canvas_width.round() as i32;
+        let new_h = controller.config.canvas_height.round() as i32;
+        let top_padding = controller.config.top_padding.round() as i32;
+        self.top_padding = top_padding;
+
+        // 4. Resize DIB section surface if canvas dimensions changed
+        self.resize_surface(new_w, new_h);
+
+        // 5. Center with new scaled dimensions on target display
+        let new_x = mon.rect.left + (mon_w - new_w) / 2;
+        let new_y = mon.rect.top + top_padding;
+        self.x = new_x;
+        self.y = new_y;
+
+        unsafe {
+            ACTIVE_WINDOW_X = new_x;
+            ACTIVE_WINDOW_Y = new_y;
+            SetWindowPos(
+                self.hwnd,
+                0 as _,
+                new_x,
+                new_y,
+                new_w,
+                new_h,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+
+        scale_factor
     }
 
     pub fn render<F>(&mut self, draw_fn: F)

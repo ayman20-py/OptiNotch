@@ -1,6 +1,9 @@
 pub mod control;
 pub use control::MediaInfo;
 
+pub mod layout;
+pub use layout::MediaLayout;
+
 pub mod manager;
 pub use manager::MediaManager;
 

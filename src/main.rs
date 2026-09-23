@@ -30,7 +30,7 @@ fn main() {
     let config = NotchConfig::new(scale_factor);
     let mut controller = NotchController::new(config);
     let mut notch = NotchWindow::new(&mut controller);
-    let clock_ui = ClockUI::new(scale_factor);
+    let mut clock_ui = ClockUI::new(scale_factor);
     let mut media_manager = MediaManager::new();
 
     // 3. Register System Tray Icon
@@ -42,14 +42,12 @@ fn main() {
     }
 
     // 5. Initial Render
-    let canvas_w = controller.config.canvas_width;
-    let canvas_h = controller.config.canvas_height;
     let (media_info, album_art) = media_manager.get_state();
     notch.render(|canvas| {
         render::draw_notch(
             canvas,
-            canvas_w,
-            canvas_h,
+            controller.config.canvas_width,
+            controller.config.canvas_height,
             &controller,
             &clock_ui,
             &media_info,
@@ -57,7 +55,7 @@ fn main() {
         );
     });
 
-    println!("OptiNotch running! Media player controls active.");
+    println!("OptiNotch running! Multi-monitor scaling & controls active.");
 
     // 6. Main Event Loop with Hardware VSync
     unsafe {
@@ -79,15 +77,42 @@ fn main() {
                 controller.collapse();
             }
 
+            let (media_info, _album_art) = media_manager.get_state();
+            controller.sync_play_state(media_info.is_playing);
+
             // Media Control Button Clicks
             if notch.check_media_toggle() {
-                MediaManager::toggle_play_pause();
+                let next_play = !media_info.is_playing;
+                controller.trigger_play_press(next_play);
+                media_manager.toggle_play_pause();
             }
             if notch.check_media_next() {
-                MediaManager::skip_next();
+                controller.trigger_next_press();
+                media_manager.skip_next();
             }
             if notch.check_media_prev() {
-                MediaManager::skip_previous();
+                controller.trigger_prev_press();
+                media_manager.skip_previous();
+            }
+
+            // Monitor Switch Button Click
+            if notch.check_switch_monitor() {
+                controller.trigger_monitor_press();
+                let new_scale = notch.switch_to_next_monitor(&mut controller);
+                clock_ui = ClockUI::new(new_scale);
+
+                let (media_info, album_art) = media_manager.get_state();
+                notch.render(|canvas| {
+                    render::draw_notch(
+                        canvas,
+                        controller.config.canvas_width,
+                        controller.config.canvas_height,
+                        &controller,
+                        &clock_ui,
+                        &media_info,
+                        album_art,
+                    );
+                });
             }
 
             // Check if user right-clicked tray icon -> show context menu
@@ -105,8 +130,8 @@ fn main() {
                 notch.render(|canvas| {
                     render::draw_notch(
                         canvas,
-                        canvas_w,
-                        canvas_h,
+                        controller.config.canvas_width,
+                        controller.config.canvas_height,
                         &controller,
                         &clock_ui,
                         &media_info,
@@ -139,8 +164,8 @@ fn main() {
                     notch.render(|canvas| {
                         render::draw_notch(
                             canvas,
-                            canvas_w,
-                            canvas_h,
+                            controller.config.canvas_width,
+                            controller.config.canvas_height,
                             &controller,
                             &clock_ui,
                             &media_info,
