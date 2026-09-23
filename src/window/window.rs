@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use skia_safe::{surfaces, AlphaType, Canvas, ColorType, ImageInfo};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, RegisterHotKey, UnregisterHotKey,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::state::{MediaAction, NotchController, NotchState};
@@ -25,12 +27,21 @@ static MEDIA_TOGGLE_FLAG: AtomicBool = AtomicBool::new(false);
 static MEDIA_NEXT_FLAG: AtomicBool = AtomicBool::new(false);
 static MEDIA_PREV_FLAG: AtomicBool = AtomicBool::new(false);
 static SWITCH_MONITOR_FLAG: AtomicBool = AtomicBool::new(false);
+static HIDE_NOTCH_FLAG: AtomicBool = AtomicBool::new(false);
 
 static mut ACTIVE_CONTROLLER_PTR: usize = 0;
 static mut ACTIVE_WINDOW_HWND: HWND = 0 as _;
 static mut ACTIVE_WINDOW_X: i32 = 0;
 static mut ACTIVE_WINDOW_Y: i32 = 0;
 static mut MOUSE_HOOK: HHOOK = 0 as _;
+static mut KEYBOARD_HOOK: HHOOK = 0 as _;
+
+// Virtual key codes for Win & Alt
+const VK_LWIN: u32 = 0x5B;
+const VK_RWIN: u32 = 0x5C;
+const VK_LMENU: u32 = 0xA4;
+const VK_RMENU: u32 = 0xA5;
+const VK_MENU: u32 = 0x12;
 
 #[derive(Clone, Copy)]
 pub struct MonitorDevice {
@@ -123,6 +134,31 @@ unsafe extern "system" fn mouse_hook_proc(n_code: i32, wparam: WPARAM, lparam: L
         }
     }
     unsafe { CallNextHookEx(MOUSE_HOOK, n_code, wparam, lparam) }
+}
+
+/// Global low-level keyboard hook procedure to detect Win + Alt key combinations
+unsafe extern "system" fn keyboard_hook_proc(n_code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if n_code >= 0 {
+        let msg = wparam as u32;
+        if msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP {
+            unsafe {
+                let win_down = (GetAsyncKeyState(VK_LWIN as i32) as u16 & 0x8000 != 0)
+                    || (GetAsyncKeyState(VK_RWIN as i32) as u16 & 0x8000 != 0);
+                let alt_down = (GetAsyncKeyState(VK_MENU as i32) as u16 & 0x8000 != 0)
+                    || (GetAsyncKeyState(VK_LMENU as i32) as u16 & 0x8000 != 0)
+                    || (GetAsyncKeyState(VK_RMENU as i32) as u16 & 0x8000 != 0);
+
+                let is_holding_win_alt = win_down && alt_down;
+                let prev = HIDE_NOTCH_FLAG.swap(is_holding_win_alt, Ordering::SeqCst);
+
+                if prev != is_holding_win_alt && ACTIVE_CONTROLLER_PTR != 0 {
+                    let controller = &mut *(ACTIVE_CONTROLLER_PTR as *mut NotchController);
+                    controller.set_hidden(is_holding_win_alt);
+                }
+            }
+        }
+    }
+    unsafe { CallNextHookEx(KEYBOARD_HOOK, n_code, wparam, lparam) }
 }
 
 pub unsafe extern "system" fn wnd_proc(
@@ -408,6 +444,14 @@ impl NotchWindow {
                 0,
             );
 
+            // Install global keyboard hook for Win + Alt hold detection
+            KEYBOARD_HOOK = SetWindowsHookExW(
+                WH_KEYBOARD_LL,
+                Some(keyboard_hook_proc),
+                0 as _,
+                0,
+            );
+
             // Register global hotkey: Win + \ (VK_OEM_5)
             RegisterHotKey(
                 hwnd,
@@ -687,6 +731,9 @@ impl Drop for NotchWindow {
             UnregisterHotKey(self.hwnd, HOTKEY_TOGGLE_ID);
             if MOUSE_HOOK != 0 as _ {
                 UnhookWindowsHookEx(MOUSE_HOOK);
+            }
+            if KEYBOARD_HOOK != 0 as _ {
+                UnhookWindowsHookEx(KEYBOARD_HOOK);
             }
             if self.hbitmap != 0 as _ {
                 DeleteObject(self.hbitmap);

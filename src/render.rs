@@ -18,6 +18,27 @@ pub fn draw_notch(
     // 1. Clear transparent background
     canvas.clear(Color::TRANSPARENT);
 
+    let opacity = controller.opacity_spring.current.clamp(0.0, 1.0);
+    if opacity <= 0.005 {
+        // Completely invisible
+        return;
+    }
+
+    let alpha_u8 = (opacity * 255.0).round() as u8;
+    let scale_factor_anim = controller.scale_spring.current;
+
+    canvas.save();
+    let center_x = canvas_width / 2.0;
+    let top_y = 0.0;
+    canvas.translate((center_x, top_y));
+    canvas.scale((scale_factor_anim, scale_factor_anim));
+    canvas.translate((-center_x, -top_y));
+
+    canvas.save_layer_alpha(
+        Rect::from_xywh(0.0, 0.0, canvas_width, controller.config.canvas_height),
+        alpha_u8 as u32,
+    );
+
     let current_w = controller.current_width();
     let current_h = controller.current_height();
 
@@ -122,6 +143,9 @@ pub fn draw_notch(
         );
         crate::calendar::draw_calendar(canvas, &controller.calendar, &cal_layout, scale);
     }
+
+    canvas.restore(); // restore layer
+    canvas.restore(); // restore scale transform
 }
 
 fn draw_monitor_button(

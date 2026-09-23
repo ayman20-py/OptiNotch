@@ -148,6 +148,9 @@ pub struct NotchController {
     pub config: NotchConfig,
     pub width_spring: Spring,
     pub height_spring: Spring,
+    pub opacity_spring: Spring, // 0.0 = completely transparent/hidden, 1.0 = fully visible
+    pub scale_spring: Spring,   // 0.85 = micro-scale when hidden, 1.0 = normal
+    pub is_hidden: bool,
     pub btn_anims: ButtonAnimations,
     pub calendar: crate::calendar::CalendarState,
     pub current_monitor: usize,
@@ -163,12 +166,17 @@ impl NotchController {
 
         let width_spring = Spring::new(initial_w, 400.0, 35.0);
         let height_spring = Spring::new(initial_h, 500.0, 35.0);
+        let opacity_spring = Spring::new(1.0, 950.0, 42.0);
+        let scale_spring = Spring::new(1.0, 850.0, 38.0);
 
         Self {
             state: NotchState::Collapsed,
             config,
             width_spring,
             height_spring,
+            opacity_spring,
+            scale_spring,
+            is_hidden: false,
             btn_anims: ButtonAnimations::new(),
             calendar: crate::calendar::CalendarState::new(),
             current_monitor: 0,
@@ -268,6 +276,16 @@ impl NotchController {
         }
     }
 
+    pub fn set_hidden(&mut self, hidden: bool) {
+        if self.is_hidden != hidden {
+            self.is_hidden = hidden;
+            self.opacity_spring.set_target(if hidden { 0.0 } else { 1.0 });
+            self.scale_spring.set_target(if hidden { 0.88 } else { 1.0 });
+            self.is_animating = true;
+            self.last_frame_time = Some(Instant::now());
+        }
+    }
+
     pub fn step_animation(&mut self) -> bool {
         if !self.is_animating {
             return false;
@@ -282,9 +300,11 @@ impl NotchController {
 
         let w_active = self.width_spring.update(dt);
         let h_active = self.height_spring.update(dt);
+        let op_active = self.opacity_spring.update(dt);
+        let sc_active = self.scale_spring.update(dt);
         let btn_active = self.btn_anims.update(dt);
 
-        self.is_animating = w_active || h_active || btn_active;
+        self.is_animating = w_active || h_active || op_active || sc_active || btn_active;
         self.is_animating
     }
 
