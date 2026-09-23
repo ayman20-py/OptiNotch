@@ -6,6 +6,14 @@ pub enum NotchState {
     Expanded,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MediaAction {
+    TogglePlayPause,
+    SkipNext,
+    SkipPrevious,
+    None,
+}
+
 #[derive(Debug, Clone)]
 pub struct NotchConfig {
     pub collapsed_width: f32,
@@ -103,8 +111,8 @@ impl NotchController {
         let initial_w = config.collapsed_width;
         let initial_h = config.collapsed_height;
 
-        let width_spring = Spring::new(initial_w, 360.0, 30.0);
-        let height_spring = Spring::new(initial_h, 400.0, 32.0);
+        let width_spring = Spring::new(initial_w, 400.0, 35.0);
+        let height_spring = Spring::new(initial_h, 500.0, 35.0);
 
         Self {
             state: NotchState::Collapsed,
@@ -181,5 +189,45 @@ impl NotchController {
         let local_x = (screen_x - window_x) as f32;
         let local_y = (screen_y - window_y) as f32;
         self.is_inside_pill(local_x, local_y)
+    }
+
+    /// Check if a click hit a media playback control button (Play/Pause, Previous, Next)
+    pub fn check_media_click(&self, local_x: f32, local_y: f32) -> MediaAction {
+        if self.state != NotchState::Expanded {
+            return MediaAction::None;
+        }
+
+        let scale = self.config.scale_factor;
+        let pill_x = (self.config.canvas_width - self.current_width()) / 2.0;
+        let pill_y = 0.0;
+        let current_w = self.current_width();
+        let current_h = self.current_height();
+
+        let art_size = 70.0 * scale;
+        let art_x = pill_x + (current_w * 0.05);
+        let art_y = pill_y + (current_h - art_size) / 2.0;
+        let info_x = art_x + (art_size * 1.15);
+        let info_y = art_y + (art_size * 0.2);
+        let bar_y = info_y + (36.0 * scale);
+        let bar_w = (200.0 * scale).min(pill_x + current_w - info_x - (20.0 * scale));
+        let controls_cx = info_x + bar_w / 2.0;
+        let controls_cy = bar_y + (30.0 * scale);
+        let spacing = 36.0 * scale;
+
+        let hit_circle = |cx: f32, cy: f32, radius: f32| -> bool {
+            let dx = local_x - cx;
+            let dy = local_y - cy;
+            (dx * dx + dy * dy) <= (radius * radius)
+        };
+
+        if hit_circle(controls_cx, controls_cy, 20.0 * scale) {
+            MediaAction::TogglePlayPause
+        } else if hit_circle(controls_cx - spacing, controls_cy, 18.0 * scale) {
+            MediaAction::SkipPrevious
+        } else if hit_circle(controls_cx + spacing, controls_cy, 18.0 * scale) {
+            MediaAction::SkipNext
+        } else {
+            MediaAction::None
+        }
     }
 }

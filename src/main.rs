@@ -1,15 +1,17 @@
+mod media;
 mod render;
 mod ui;
 mod window;
 
+use media::MediaManager;
 use ui::clock::ClockUI;
 use window::{NotchConfig, NotchController, NotchWindow, TrayIcon};
 use windows_sys::Win32::Graphics::Dwm::DwmFlush;
 use windows_sys::Win32::UI::HiDpi::{
-    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem, SetProcessDpiAwarenessContext,
+    GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MSG, PM_REMOVE, PeekMessageW, SetTimer, TranslateMessage,
+    DispatchMessageW, GetMessageW, PeekMessageW, SetTimer, TranslateMessage, MSG, PM_REMOVE,
     WM_QUIT, WM_TIMER,
 };
 
@@ -24,11 +26,12 @@ fn main() {
     let dpi = unsafe { GetDpiForSystem() } as f32;
     let scale_factor = dpi / 96.0;
 
-    // 2. Setup Config, Controller, Window, and Clock UI
+    // 2. Setup Config, Controller, Window, Clock UI, and Media Manager
     let config = NotchConfig::new(scale_factor);
     let mut controller = NotchController::new(config);
     let mut notch = NotchWindow::new(&mut controller);
     let clock_ui = ClockUI::new(scale_factor);
+    let mut media_manager = MediaManager::new();
 
     // 3. Register System Tray Icon
     let tray = TrayIcon::new(notch.hwnd, 100, "OptiNotch - Click to toggle");
@@ -41,11 +44,20 @@ fn main() {
     // 5. Initial Render
     let canvas_w = controller.config.canvas_width;
     let canvas_h = controller.config.canvas_height;
+    let (media_info, album_art) = media_manager.get_state();
     notch.render(|canvas| {
-        render::draw_notch(canvas, canvas_w, canvas_h, &controller, &clock_ui);
+        render::draw_notch(
+            canvas,
+            canvas_w,
+            canvas_h,
+            &controller,
+            &clock_ui,
+            &media_info,
+            album_art,
+        );
     });
 
-    println!("OptiNotch running! Click collapsed notch to expand; click outside to collapse.");
+    println!("OptiNotch running! Media player controls active.");
 
     // 6. Main Event Loop with Hardware VSync
     unsafe {
@@ -67,6 +79,17 @@ fn main() {
                 controller.collapse();
             }
 
+            // Media Control Button Clicks
+            if notch.check_media_toggle() {
+                MediaManager::toggle_play_pause();
+            }
+            if notch.check_media_next() {
+                MediaManager::skip_next();
+            }
+            if notch.check_media_prev() {
+                MediaManager::skip_previous();
+            }
+
             // Check if user right-clicked tray icon -> show context menu
             if notch.check_show_tray_menu() {
                 tray.show_context_menu();
@@ -78,8 +101,17 @@ fn main() {
                 // ============================================================
                 controller.step_animation();
 
+                let (media_info, album_art) = media_manager.get_state();
                 notch.render(|canvas| {
-                    render::draw_notch(canvas, canvas_w, canvas_h, &controller, &clock_ui);
+                    render::draw_notch(
+                        canvas,
+                        canvas_w,
+                        canvas_h,
+                        &controller,
+                        &clock_ui,
+                        &media_info,
+                        album_art,
+                    );
                 });
 
                 while PeekMessageW(&mut msg, 0 as _, 0, 0, PM_REMOVE) != 0 {
@@ -103,8 +135,17 @@ fn main() {
                 DispatchMessageW(&msg);
 
                 if msg.message == WM_TIMER && msg.wParam == TIMER_CLOCK_ID {
+                    let (media_info, album_art) = media_manager.get_state();
                     notch.render(|canvas| {
-                        render::draw_notch(canvas, canvas_w, canvas_h, &controller, &clock_ui);
+                        render::draw_notch(
+                            canvas,
+                            canvas_w,
+                            canvas_h,
+                            &controller,
+                            &clock_ui,
+                            &media_info,
+                            album_art,
+                        );
                     });
                 }
             }

@@ -6,13 +6,16 @@ use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use super::state::{NotchController, NotchState};
+use super::state::{MediaAction, NotchController, NotchState};
 use super::tray::{IDM_EXIT, IDM_TOGGLE, WM_TRAY_ICON};
 
 static EXPAND_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 static COLLAPSE_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 static SHOW_TRAY_MENU_FLAG: AtomicBool = AtomicBool::new(false);
 static EXIT_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
+static MEDIA_TOGGLE_FLAG: AtomicBool = AtomicBool::new(false);
+static MEDIA_NEXT_FLAG: AtomicBool = AtomicBool::new(false);
+static MEDIA_PREV_FLAG: AtomicBool = AtomicBool::new(false);
 
 static mut ACTIVE_CONTROLLER_PTR: usize = 0;
 static mut ACTIVE_WINDOW_HWND: HWND = 0 as _;
@@ -73,10 +76,27 @@ pub unsafe extern "system" fn wnd_proc(
 
             if !controller_ptr.is_null() {
                 let controller = unsafe { &*controller_ptr };
-                // Only trigger expand when clicked in Collapsed state.
-                // Clicking inside the expanded card does NOT collapse!
+
                 if controller.state == NotchState::Collapsed {
+                    // Click on compact pill expands it
                     EXPAND_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                } else if controller.state == NotchState::Expanded {
+                    // In expanded mode: check if user clicked a media control button!
+                    let local_x = (lparam & 0xFFFF) as i16 as f32;
+                    let local_y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+
+                    match controller.check_media_click(local_x, local_y) {
+                        MediaAction::TogglePlayPause => {
+                            MEDIA_TOGGLE_FLAG.store(true, Ordering::SeqCst);
+                        }
+                        MediaAction::SkipNext => {
+                            MEDIA_NEXT_FLAG.store(true, Ordering::SeqCst);
+                        }
+                        MediaAction::SkipPrevious => {
+                            MEDIA_PREV_FLAG.store(true, Ordering::SeqCst);
+                        }
+                        MediaAction::None => {}
+                    }
                 }
             }
             0
@@ -287,24 +307,32 @@ impl NotchWindow {
         }
     }
 
-    /// Check if user requested to expand (clicked collapsed pill)
     pub fn check_expand_requested(&self) -> bool {
         EXPAND_REQUESTED_FLAG.swap(false, Ordering::SeqCst)
     }
 
-    /// Check if user requested to collapse (clicked outside expanded card)
     pub fn check_collapse_requested(&self) -> bool {
         COLLAPSE_REQUESTED_FLAG.swap(false, Ordering::SeqCst)
     }
 
-    /// Check if right-clicked tray icon
     pub fn check_show_tray_menu(&self) -> bool {
         SHOW_TRAY_MENU_FLAG.swap(false, Ordering::SeqCst)
     }
 
-    /// Check if user selected exit from tray menu
     pub fn check_exit_requested(&self) -> bool {
         EXIT_REQUESTED_FLAG.load(Ordering::SeqCst)
+    }
+
+    pub fn check_media_toggle(&self) -> bool {
+        MEDIA_TOGGLE_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    pub fn check_media_next(&self) -> bool {
+        MEDIA_NEXT_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    pub fn check_media_prev(&self) -> bool {
+        MEDIA_PREV_FLAG.swap(false, Ordering::SeqCst)
     }
 
     pub fn render<F>(&mut self, draw_fn: F)

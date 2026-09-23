@@ -1,6 +1,9 @@
+use crate::media::{
+    MediaInfo, draw_album_art, draw_media_info, draw_playback_controls, draw_progress_bar,
+};
 use crate::ui::clock::ClockUI;
 use crate::window::NotchController;
-use skia_safe::{Canvas, Color, Paint, PaintStyle, RRect, Rect};
+use skia_safe::{Canvas, Color, Image, Paint, PaintStyle, RRect, Rect};
 
 pub fn draw_notch(
     canvas: &Canvas,
@@ -8,6 +11,8 @@ pub fn draw_notch(
     _canvas_height: f32,
     controller: &NotchController,
     clock_ui: &ClockUI,
+    media_info: &MediaInfo,
+    album_art: Option<&Image>,
 ) {
     // 1. Clear transparent background
     canvas.clear(Color::TRANSPARENT);
@@ -20,7 +25,6 @@ pub fn draw_notch(
     let pill_y = 0.0;
 
     // Smooth corner radius transition:
-    // Morph from pill corner radius (h/2) to rounded card (22px)
     let min_h = controller.config.collapsed_height;
     let max_h = controller.config.expanded_height;
     let progress = ((current_h - min_h) / (max_h - min_h)).clamp(0.0, 1.0);
@@ -47,12 +51,61 @@ pub fn draw_notch(
     border_paint.set_color(Color::from_argb(35, 255, 255, 255));
     canvas.draw_rrect(rrect, &border_paint);
 
-    // 4. Draw content (morph seamlessly between compact and expanded views)
+    // 4. Draw content based on animation progress
     if progress < 0.45 {
-        // Draw compact clock
+        // Collapsed View (Clock)
         clock_ui.draw(canvas, canvas_width, current_h);
     } else {
-        // Draw expanded card content
+        // Expanded View (Clock & Date)
         clock_ui.draw_expanded(canvas, pill_x, pill_y, current_w, current_h);
+
+        // Media Widget (when media is detected)
+        if media_info.has_media {
+            let scale = controller.config.scale_factor;
+            let art_size = 70.0 * scale;
+            let art_x = pill_x + (current_w * 0.05);
+            let art_y = pill_y + (current_h - art_size) / 1.6;
+
+            // Draw Album Art (Preserving user position)
+            draw_album_art(canvas, album_art, art_x, art_y, art_size);
+
+            // Draw Track Title & Artist (Preserving user position)
+            let info_x = art_x + (art_size * 1.15);
+            let info_y = art_y + (art_size * 0.02);
+            let max_w = pill_x + current_w - info_x - (20.0 * scale);
+            draw_media_info(
+                canvas,
+                &media_info.title,
+                &media_info.artist,
+                info_x,
+                info_y,
+                max_w,
+                scale,
+            );
+
+            // Draw Media Progress Bar
+            let bar_y = info_y + (47.0 * scale);
+            let bar_w = (160.0 * scale).min(max_w);
+            draw_progress_bar(
+                canvas,
+                info_x,
+                bar_y,
+                bar_w,
+                media_info.position_secs,
+                media_info.duration_secs,
+                scale,
+            );
+
+            // Draw Playback Controls (Previous, Play/Pause, Next)
+            let controls_cx = info_x + bar_w / 2.0;
+            let controls_cy = bar_y + (30.0 * scale);
+            draw_playback_controls(
+                canvas,
+                controls_cx,
+                controls_cy,
+                media_info.is_playing,
+                scale,
+            );
+        }
     }
 }
