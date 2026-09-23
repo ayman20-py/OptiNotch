@@ -4,10 +4,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use skia_safe::{surfaces, AlphaType, Canvas, ColorType, ImageInfo};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::state::{MediaAction, NotchController, NotchState};
 use super::tray::{IDM_EXIT, IDM_TOGGLE, WM_TRAY_ICON};
+
+const HOTKEY_TOGGLE_ID: i32 = 1001;
+
+// Windows Key + \ (VK_OEM_5 = 0xDC)
+const MOD_WIN: u32 = 0x0008;
+const MOD_NOREPEAT: u32 = 0x4000;
+const VK_OEM_5: u32 = 0xDC;
 
 static EXPAND_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 static COLLAPSE_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
@@ -263,6 +271,24 @@ pub unsafe extern "system" fn wnd_proc(
             0
         }
 
+        // Global Keyboard Shortcut: Win + \
+        WM_HOTKEY => {
+            if wparam as i32 == HOTKEY_TOGGLE_ID {
+                let controller_ptr = unsafe {
+                    GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const NotchController
+                };
+                if !controller_ptr.is_null() {
+                    let controller = unsafe { &*controller_ptr };
+                    if controller.state == NotchState::Collapsed {
+                        EXPAND_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                    } else {
+                        COLLAPSE_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                    }
+                }
+            }
+            0
+        }
+
         // Dynamic Click-Through Hit Testing
         WM_NCHITTEST => {
             let controller_ptr = unsafe {
@@ -380,6 +406,14 @@ impl NotchWindow {
                 Some(mouse_hook_proc),
                 0 as _,
                 0,
+            );
+
+            // Register global hotkey: Win + \ (VK_OEM_5)
+            RegisterHotKey(
+                hwnd,
+                HOTKEY_TOGGLE_ID,
+                MOD_WIN | MOD_NOREPEAT,
+                VK_OEM_5,
             );
 
             // Create Memory DC
@@ -650,6 +684,7 @@ impl NotchWindow {
 impl Drop for NotchWindow {
     fn drop(&mut self) {
         unsafe {
+            UnregisterHotKey(self.hwnd, HOTKEY_TOGGLE_ID);
             if MOUSE_HOOK != 0 as _ {
                 UnhookWindowsHookEx(MOUSE_HOOK);
             }
