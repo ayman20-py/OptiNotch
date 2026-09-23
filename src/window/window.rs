@@ -6,15 +6,51 @@ use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use super::state::NotchController;
+use super::state::{NotchController, NotchState};
 use super::tray::{IDM_EXIT, IDM_TOGGLE, WM_TRAY_ICON};
 
-static CLICKED_FLAG: AtomicBool = AtomicBool::new(false);
+static EXPAND_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
+static COLLAPSE_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 static SHOW_TRAY_MENU_FLAG: AtomicBool = AtomicBool::new(false);
 static EXIT_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 
+static mut ACTIVE_CONTROLLER_PTR: usize = 0;
+static mut ACTIVE_WINDOW_HWND: HWND = 0 as _;
+static mut ACTIVE_WINDOW_X: i32 = 0;
+static mut ACTIVE_WINDOW_Y: i32 = 0;
+static mut MOUSE_HOOK: HHOOK = 0 as _;
+
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Global low-level mouse hook procedure to detect clicks outside the expanded notch
+unsafe extern "system" fn mouse_hook_proc(n_code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if n_code >= 0 {
+        let msg = wparam as u32;
+        if msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_NCLBUTTONDOWN {
+            unsafe {
+                let hook_struct = &*(lparam as *const MSLLHOOKSTRUCT);
+                let pt = hook_struct.pt;
+
+                if ACTIVE_CONTROLLER_PTR != 0 {
+                    let controller = &*(ACTIVE_CONTROLLER_PTR as *const NotchController);
+                    if controller.state == NotchState::Expanded {
+                        // Check if click was outside the expanded card
+                        if !controller.is_inside_screen_rect(
+                            ACTIVE_WINDOW_X,
+                            ACTIVE_WINDOW_Y,
+                            pt.x,
+                            pt.y,
+                        ) {
+                            COLLAPSE_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    unsafe { CallNextHookEx(MOUSE_HOOK, n_code, wparam, lparam) }
 }
 
 pub unsafe extern "system" fn wnd_proc(
@@ -29,9 +65,20 @@ pub unsafe extern "system" fn wnd_proc(
             0
         }
 
-        // Notch direct click
+        // Notch direct click on the window
         WM_LBUTTONUP => {
-            CLICKED_FLAG.store(true, Ordering::SeqCst);
+            let controller_ptr = unsafe {
+                GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const NotchController
+            };
+
+            if !controller_ptr.is_null() {
+                let controller = unsafe { &*controller_ptr };
+                // Only trigger expand when clicked in Collapsed state.
+                // Clicking inside the expanded card does NOT collapse!
+                if controller.state == NotchState::Collapsed {
+                    EXPAND_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                }
+            }
             0
         }
 
@@ -41,7 +88,17 @@ pub unsafe extern "system" fn wnd_proc(
             if event == WM_RBUTTONUP {
                 SHOW_TRAY_MENU_FLAG.store(true, Ordering::SeqCst);
             } else if event == WM_LBUTTONUP {
-                CLICKED_FLAG.store(true, Ordering::SeqCst);
+                let controller_ptr = unsafe {
+                    GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const NotchController
+                };
+                if !controller_ptr.is_null() {
+                    let controller = unsafe { &*controller_ptr };
+                    if controller.state == NotchState::Collapsed {
+                        EXPAND_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                    } else {
+                        COLLAPSE_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                    }
+                }
             }
             0
         }
@@ -50,7 +107,17 @@ pub unsafe extern "system" fn wnd_proc(
         WM_COMMAND => {
             let cmd_id = (wparam & 0xFFFF) as usize;
             if cmd_id == IDM_TOGGLE {
-                CLICKED_FLAG.store(true, Ordering::SeqCst);
+                let controller_ptr = unsafe {
+                    GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const NotchController
+                };
+                if !controller_ptr.is_null() {
+                    let controller = unsafe { &*controller_ptr };
+                    if controller.state == NotchState::Collapsed {
+                        EXPAND_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                    } else {
+                        COLLAPSE_REQUESTED_FLAG.store(true, Ordering::SeqCst);
+                    }
+                }
             } else if cmd_id == IDM_EXIT {
                 EXIT_REQUESTED_FLAG.store(true, Ordering::SeqCst);
                 unsafe { DestroyWindow(hwnd) };
@@ -151,8 +218,21 @@ impl NotchWindow {
                 panic!("[!] Failed to create OptiNotch window");
             }
 
-            // Bind controller pointer to window for WM_NCHITTEST
+            // Save pointers for global hook & hit testing
+            ACTIVE_CONTROLLER_PTR = controller as *mut NotchController as usize;
+            ACTIVE_WINDOW_HWND = hwnd;
+            ACTIVE_WINDOW_X = x;
+            ACTIVE_WINDOW_Y = y;
+
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, controller as *mut NotchController as isize);
+
+            // Install global mouse hook for click-outside detection
+            MOUSE_HOOK = SetWindowsHookExW(
+                WH_MOUSE_LL,
+                Some(mouse_hook_proc),
+                0 as _,
+                0,
+            );
 
             // Create Memory DC
             let hdc_screen = GetDC(0 as _);
@@ -207,9 +287,14 @@ impl NotchWindow {
         }
     }
 
-    /// Check if user clicked the notch
-    pub fn check_clicked(&self) -> bool {
-        CLICKED_FLAG.swap(false, Ordering::SeqCst)
+    /// Check if user requested to expand (clicked collapsed pill)
+    pub fn check_expand_requested(&self) -> bool {
+        EXPAND_REQUESTED_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    /// Check if user requested to collapse (clicked outside expanded card)
+    pub fn check_collapse_requested(&self) -> bool {
+        COLLAPSE_REQUESTED_FLAG.swap(false, Ordering::SeqCst)
     }
 
     /// Check if right-clicked tray icon
@@ -285,6 +370,9 @@ impl NotchWindow {
 impl Drop for NotchWindow {
     fn drop(&mut self) {
         unsafe {
+            if MOUSE_HOOK != 0 as _ {
+                UnhookWindowsHookEx(MOUSE_HOOK);
+            }
             if self.hbitmap != 0 as _ {
                 DeleteObject(self.hbitmap);
             }

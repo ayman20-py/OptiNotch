@@ -6,10 +6,10 @@ use ui::clock::ClockUI;
 use window::{NotchConfig, NotchController, NotchWindow, TrayIcon};
 use windows_sys::Win32::Graphics::Dwm::DwmFlush;
 use windows_sys::Win32::UI::HiDpi::{
-    GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, PeekMessageW, SetTimer, TranslateMessage, MSG, PM_REMOVE,
+    DispatchMessageW, GetMessageW, MSG, PM_REMOVE, PeekMessageW, SetTimer, TranslateMessage,
     WM_QUIT, WM_TIMER,
 };
 
@@ -45,7 +45,7 @@ fn main() {
         render::draw_notch(canvas, canvas_w, canvas_h, &controller, &clock_ui);
     });
 
-    println!("OptiNotch running! System tray icon active.");
+    println!("OptiNotch running! Click collapsed notch to expand; click outside to collapse.");
 
     // 6. Main Event Loop with Hardware VSync
     unsafe {
@@ -57,9 +57,14 @@ fn main() {
                 break 'main_loop;
             }
 
-            // Check if user clicked the notch or left-clicked tray icon
-            if notch.check_clicked() {
-                controller.toggle_state();
+            // Expand when user clicks the collapsed notch
+            if notch.check_expand_requested() {
+                controller.expand();
+            }
+
+            // Collapse when user clicks outside the expanded card
+            if notch.check_collapse_requested() {
+                controller.collapse();
             }
 
             // Check if user right-clicked tray icon -> show context menu

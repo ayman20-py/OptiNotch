@@ -17,3 +17,10 @@ windows-sys = { version = ">=0.59, <=0.61", features = [
     "Win32_System_SystemInformation",
     "Win32_UI_Shell",
 ] }
+
+windows = { version = "0.59", features = [
+    "Media_Control",
+    "Storage_Streams",
+    "Foundation",
+    "Foundation_Collections",
+] }

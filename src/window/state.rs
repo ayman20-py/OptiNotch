@@ -48,8 +48,8 @@ pub struct Spring {
     pub current: f32,
     pub target: f32,
     pub velocity: f32,
-    pub stiffness: f32, // Tension (higher = snappier)
-    pub damping: f32,   // Friction (higher = less bounce)
+    pub stiffness: f32,
+    pub damping: f32,
 }
 
 impl Spring {
@@ -69,7 +69,6 @@ impl Spring {
 
     /// Step spring physics by dt seconds
     pub fn update(&mut self, dt: f32) -> bool {
-        // Clamp dt to avoid physics blow-ups on frame lag
         let dt = dt.min(0.032);
 
         let displacement = self.current - self.target;
@@ -80,7 +79,6 @@ impl Spring {
         self.velocity += acceleration * dt;
         self.current += self.velocity * dt;
 
-        // Check if settled
         let is_settled = displacement.abs() < 0.25 && self.velocity.abs() < 0.5;
         if is_settled {
             self.current = self.target;
@@ -105,9 +103,8 @@ impl NotchController {
         let initial_w = config.collapsed_width;
         let initial_h = config.collapsed_height;
 
-        // Apple fluid spring tuning: stiffness = 280, damping = 26
-        let width_spring = Spring::new(initial_w, 400.0, 35.0);
-        let height_spring = Spring::new(initial_h, 500.0, 35.0);
+        let width_spring = Spring::new(initial_w, 360.0, 30.0);
+        let height_spring = Spring::new(initial_h, 400.0, 32.0);
 
         Self {
             state: NotchState::Collapsed,
@@ -127,28 +124,29 @@ impl NotchController {
         self.height_spring.current
     }
 
-    /// Toggle between Collapsed and Expanded states
-    pub fn toggle_state(&mut self) {
-        match self.state {
-            NotchState::Collapsed => {
-                self.state = NotchState::Expanded;
-                self.width_spring.set_target(self.config.expanded_width);
-                self.height_spring.set_target(self.config.expanded_height);
-                self.is_animating = true;
-                self.last_frame_time = Some(Instant::now());
-            }
-            NotchState::Expanded => {
-                self.state = NotchState::Collapsed;
-                self.width_spring.set_target(self.config.collapsed_width);
-                self.height_spring.set_target(self.config.collapsed_height);
-                self.is_animating = true;
-                self.last_frame_time = Some(Instant::now());
-            }
+    /// Explicitly expand the notch
+    pub fn expand(&mut self) {
+        if self.state != NotchState::Expanded {
+            self.state = NotchState::Expanded;
+            self.width_spring.set_target(self.config.expanded_width);
+            self.height_spring.set_target(self.config.expanded_height);
+            self.is_animating = true;
+            self.last_frame_time = Some(Instant::now());
         }
     }
 
-    /// Advance physics using high-precision delta time (dt).
-    /// Returns true if still animating.
+    /// Explicitly collapse the notch
+    pub fn collapse(&mut self) {
+        if self.state != NotchState::Collapsed {
+            self.state = NotchState::Collapsed;
+            self.width_spring.set_target(self.config.collapsed_width);
+            self.height_spring.set_target(self.config.collapsed_height);
+            self.is_animating = true;
+            self.last_frame_time = Some(Instant::now());
+        }
+    }
+
+    /// Advance physics using delta time
     pub fn step_animation(&mut self) -> bool {
         if !self.is_animating {
             return false;
@@ -158,7 +156,7 @@ impl NotchController {
         let dt = self
             .last_frame_time
             .map(|last| (now - last).as_secs_f32())
-            .unwrap_or(0.00833); // default ~120Hz dt
+            .unwrap_or(0.00833);
         self.last_frame_time = Some(now);
 
         let w_active = self.width_spring.update(dt);
@@ -168,7 +166,7 @@ impl NotchController {
         self.is_animating
     }
 
-    /// Hit-test: Check if local window coordinates (x, y) fall inside the active notch pill
+    /// Hit-test: Check if local window coordinates (x, y) fall inside the active notch shape
     pub fn is_inside_pill(&self, local_x: f32, local_y: f32) -> bool {
         let cur_w = self.current_width();
         let cur_h = self.current_height();
@@ -176,5 +174,12 @@ impl NotchController {
         let pill_y = 0.0;
 
         local_x >= pill_x && local_x <= pill_x + cur_w && local_y >= pill_y && local_y <= pill_y + cur_h
+    }
+
+    /// Hit-test from global screen coordinates (screen_x, screen_y)
+    pub fn is_inside_screen_rect(&self, window_x: i32, window_y: i32, screen_x: i32, screen_y: i32) -> bool {
+        let local_x = (screen_x - window_x) as f32;
+        let local_y = (screen_y - window_y) as f32;
+        self.is_inside_pill(local_x, local_y)
     }
 }
