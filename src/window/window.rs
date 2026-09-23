@@ -165,6 +165,54 @@ pub unsafe extern "system" fn wnd_proc(
                         MediaAction::SwitchMonitor => {
                             SWITCH_MONITOR_FLAG.store(true, Ordering::SeqCst);
                         }
+                        MediaAction::CalendarSelectDay(idx) => {
+                            let controller_mut = unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.calendar.select_day(idx);
+                            controller_mut.is_animating = true;
+                            controller_mut.last_frame_time = Some(std::time::Instant::now());
+                        }
+                        MediaAction::CalendarPrevWeek => {
+                            let controller_mut = unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.calendar.prev_week();
+                            controller_mut.is_animating = true;
+                            controller_mut.last_frame_time = Some(std::time::Instant::now());
+                        }
+                        MediaAction::CalendarNextWeek => {
+                            let controller_mut = unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.calendar.next_week();
+                            controller_mut.is_animating = true;
+                            controller_mut.last_frame_time = Some(std::time::Instant::now());
+                        }
+                        MediaAction::CalendarOpenMonthPicker => {
+                            let controller_mut = unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.calendar.open_month_picker();
+                            controller_mut.is_animating = true;
+                            controller_mut.last_frame_time = Some(std::time::Instant::now());
+                        }
+                        MediaAction::CalendarCloseMonthPicker => {
+                            let controller_mut = unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.calendar.close_month_picker();
+                            controller_mut.is_animating = true;
+                            controller_mut.last_frame_time = Some(std::time::Instant::now());
+                        }
+                        MediaAction::CalendarPrevMonth => {
+                            let controller_mut = unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.calendar.prev_month_picker();
+                            controller_mut.is_animating = true;
+                            controller_mut.last_frame_time = Some(std::time::Instant::now());
+                        }
+                        MediaAction::CalendarNextMonth => {
+                            let controller_mut = unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.calendar.next_month_picker();
+                            controller_mut.is_animating = true;
+                            controller_mut.last_frame_time = Some(std::time::Instant::now());
+                        }
+                        MediaAction::CalendarSelectPickerDate { year, month, day } => {
+                            let controller_mut = unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.calendar.select_date_from_picker(year, month, day);
+                            controller_mut.is_animating = true;
+                            controller_mut.last_frame_time = Some(std::time::Instant::now());
+                        }
                         MediaAction::None => {}
                     }
                 }

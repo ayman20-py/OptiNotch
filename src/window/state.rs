@@ -13,6 +13,14 @@ pub enum MediaAction {
     SkipNext,
     SkipPrevious,
     SwitchMonitor,
+    CalendarSelectDay(usize),
+    CalendarPrevWeek,
+    CalendarNextWeek,
+    CalendarOpenMonthPicker,
+    CalendarCloseMonthPicker,
+    CalendarPrevMonth,
+    CalendarNextMonth,
+    CalendarSelectPickerDate { year: u32, month: u32, day: u32 },
     None,
 }
 
@@ -141,6 +149,7 @@ pub struct NotchController {
     pub width_spring: Spring,
     pub height_spring: Spring,
     pub btn_anims: ButtonAnimations,
+    pub calendar: crate::calendar::CalendarState,
     pub current_monitor: usize,
     pub total_monitors: usize,
     pub is_animating: bool,
@@ -161,6 +170,7 @@ impl NotchController {
             width_spring,
             height_spring,
             btn_anims: ButtonAnimations::new(),
+            calendar: crate::calendar::CalendarState::new(),
             current_monitor: 0,
             total_monitors: 1,
             is_animating: false,
@@ -314,7 +324,33 @@ impl NotchController {
         }
 
         // 2. Check Media Controls
-        let layout = crate::media::MediaLayout::compute(pill_x, pill_y, current_w, current_h, scale);
-        layout.hit_test(local_x, local_y)
+        let media_layout = crate::media::MediaLayout::compute(pill_x, pill_y, current_w, current_h, scale);
+        let media_act = media_layout.hit_test(local_x, local_y);
+        if media_act != MediaAction::None {
+            return media_act;
+        }
+
+        // 3. Check Calendar Controls
+        let cal_layout = crate::calendar::CalendarLayout::compute(
+            pill_x,
+            pill_y,
+            current_w,
+            current_h,
+            scale,
+            &self.calendar,
+        );
+        match cal_layout.hit_test(local_x, local_y, self.calendar.view_mode) {
+            crate::calendar::CalendarAction::SelectDay(idx) => MediaAction::CalendarSelectDay(idx),
+            crate::calendar::CalendarAction::PrevWeek => MediaAction::CalendarPrevWeek,
+            crate::calendar::CalendarAction::NextWeek => MediaAction::CalendarNextWeek,
+            crate::calendar::CalendarAction::OpenMonthPicker => MediaAction::CalendarOpenMonthPicker,
+            crate::calendar::CalendarAction::CloseMonthPicker => MediaAction::CalendarCloseMonthPicker,
+            crate::calendar::CalendarAction::PrevMonth => MediaAction::CalendarPrevMonth,
+            crate::calendar::CalendarAction::NextMonth => MediaAction::CalendarNextMonth,
+            crate::calendar::CalendarAction::SelectPickerDate { year, month, day } => {
+                MediaAction::CalendarSelectPickerDate { year, month, day }
+            }
+            crate::calendar::CalendarAction::None => MediaAction::None,
+        }
     }
 }

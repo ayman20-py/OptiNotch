@@ -14,18 +14,21 @@ pub struct MediaLayout {
 
 impl MediaLayout {
     pub fn compute(pill_x: f32, pill_y: f32, current_w: f32, current_h: f32, scale: f32) -> Self {
-        let art_size = 90.0 * scale;
-        let art_x = pill_x + (current_w * 0.05);
+        let art_size = 75.0 * scale;
+        let left_margin = 20.0 * scale;
+        let art_x = pill_x + left_margin;
         let art_y = pill_y + (current_h - art_size) / 1.4;
         let art_rect = Rect::from_xywh(art_x, art_y, art_size, art_size);
 
-        let info_x = art_x + (art_size * 1.15);
+        // Gap between album art and media info
+        let art_gap = 10.0 * scale;
+        let info_x = art_x + art_size + art_gap;
         let info_y = art_y + (art_size * 0.1);
-        let media_w = current_w * 0.55;
-        let max_w = (pill_x + media_w - info_x - (10.0 * scale)).max(60.0 * scale);
+        let media_w = current_w * 0.5;
+        let max_w = (pill_x + media_w - info_x - (8.0 * scale)).max(60.0 * scale);
 
         let bar_y = info_y + (42.0 * scale);
-        let bar_w = (195.0 * scale).min(max_w);
+        let bar_w = (175.0 * scale).min(max_w);
         let bar_rect = Rect::from_xywh(info_x, bar_y, bar_w, 3.5 * scale);
 
         let controls_cx = info_x + bar_w / 2.0;

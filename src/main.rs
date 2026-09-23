@@ -1,3 +1,4 @@
+mod calendar;
 mod media;
 mod render;
 mod ui;

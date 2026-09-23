@@ -5,6 +5,72 @@ use skia_safe::{
     Point, RRect, Rect,
 };
 
+pub fn draw_no_media_placeholder(
+    canvas: &Canvas,
+    pill_x: f32,
+    pill_y: f32,
+    current_w: f32,
+    current_h: f32,
+    scale_factor: f32,
+) {
+    let s = scale_factor;
+    let card_x = pill_x + (20.0 * s);
+    let card_y = pill_y + (current_h * 0.38);
+    let card_h = current_h * 0.52;
+
+    // 1. Modern Equalizer Waveform Glyph
+    let icon_cx = card_x + (14.0 * s);
+    let icon_cy = card_y + card_h / 2.0;
+
+    let mut icon_paint = Paint::default();
+    icon_paint.set_anti_alias(true);
+    icon_paint.set_color(Color::from_argb(140, 255, 255, 255));
+
+    // 4 vertical audio bars
+    let bar_w = 3.0 * s;
+    let heights = [10.0 * s, 20.0 * s, 15.0 * s, 9.0 * s];
+    let bar_spacing = 5.5 * s;
+    let start_x = icon_cx - (1.5 * bar_spacing);
+
+    for (i, &bh) in heights.iter().enumerate() {
+        let bx = start_x + (i as f32 * bar_spacing);
+        let by = icon_cy - bh / 2.0;
+        let bar_rrect = RRect::new_rect_xy(
+            Rect::from_xywh(bx, by, bar_w, bh),
+            bar_w / 2.0,
+            bar_w / 2.0,
+        );
+        canvas.draw_rrect(bar_rrect, &icon_paint);
+    }
+
+    // 2. Typography
+    let font_mgr = FontMgr::new();
+    let typeface = font_mgr
+        .match_family_style("Google Sans", FontStyle::normal())
+        .or_else(|| font_mgr.match_family_style("Google Sans Display", FontStyle::normal()))
+        .or_else(|| font_mgr.match_family_style("Product Sans", FontStyle::normal()))
+        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", FontStyle::normal()))
+        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Text", FontStyle::normal()))
+        .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::normal()))
+        .or_else(|| font_mgr.match_family_style("Inter", FontStyle::normal()))
+        .or_else(|| font_mgr.legacy_make_typeface(None, FontStyle::normal()))
+        .expect("Failed to load typeface for no media placeholder");
+
+    let text_x = icon_cx + (22.0 * s);
+
+    let mut title_font = Font::new(typeface, 13.0 * s);
+    title_font.set_subpixel(true);
+    title_font.set_edging(Edging::SubpixelAntiAlias);
+
+    let mut title_paint = Paint::default();
+    title_paint.set_anti_alias(true);
+    title_paint.set_color(Color::from_argb(180, 255, 255, 255));
+
+    let (_, metrics) = title_font.metrics();
+    let title_y = icon_cy - (metrics.ascent + metrics.descent) / 2.0;
+    canvas.draw_str("No Media Playing", (text_x, title_y), &title_font, &title_paint);
+}
+
 pub fn draw_album_art(canvas: &Canvas, image: Option<&Image>, dest_rect: Rect) {
     let rrect = RRect::new_rect_xy(dest_rect, 12.0, 12.0);
 
@@ -47,15 +113,29 @@ pub fn draw_media_info(
     scale_factor: f32,
 ) {
     let font_mgr = FontMgr::new();
-    let typeface = font_mgr
-        .match_family_style("Lilita One", FontStyle::normal())
+    let regular_tf = font_mgr
+        .match_family_style("Google Sans", FontStyle::normal())
+        .or_else(|| font_mgr.match_family_style("Google Sans Display", FontStyle::normal()))
+        .or_else(|| font_mgr.match_family_style("Product Sans", FontStyle::normal()))
         .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", FontStyle::normal()))
+        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Text", FontStyle::normal()))
         .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::normal()))
+        .or_else(|| font_mgr.match_family_style("Inter", FontStyle::normal()))
         .or_else(|| font_mgr.legacy_make_typeface(None, FontStyle::normal()))
         .expect("Failed to load typeface for media info");
 
+    let bold_tf = font_mgr
+        .match_family_style("Google Sans", FontStyle::bold())
+        .or_else(|| font_mgr.match_family_style("Google Sans Display", FontStyle::bold()))
+        .or_else(|| font_mgr.match_family_style("Product Sans", FontStyle::bold()))
+        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", FontStyle::bold()))
+        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Text", FontStyle::bold()))
+        .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::bold()))
+        .or_else(|| font_mgr.match_family_style("Inter", FontStyle::bold()))
+        .unwrap_or_else(|| regular_tf.clone());
+
     // 1. Title
-    let mut title_font = Font::new(typeface.clone(), 15.0 * scale_factor);
+    let mut title_font = Font::new(bold_tf, 14.0 * scale_factor);
     title_font.set_subpixel(true);
     title_font.set_edging(Edging::SubpixelAntiAlias);
 
@@ -80,13 +160,13 @@ pub fn draw_media_info(
     canvas.draw_str(&display_title, (x, title_y), &title_font, &title_paint);
 
     // 2. Artist
-    let mut artist_font = Font::new(typeface, 12.0 * scale_factor);
+    let mut artist_font = Font::new(regular_tf, 12.0 * scale_factor);
     artist_font.set_subpixel(true);
     artist_font.set_edging(Edging::SubpixelAntiAlias);
 
     let mut artist_paint = Paint::default();
     artist_paint.set_anti_alias(true);
-    artist_paint.set_color(Color::from_argb(160, 255, 255, 255));
+    artist_paint.set_color(Color::from_argb(150, 255, 255, 255));
 
     let mut display_artist = artist.to_string();
     let (mut artist_w, _) = artist_font.measure_str(&display_artist, Some(&artist_paint));

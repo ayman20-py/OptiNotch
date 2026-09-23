@@ -1,6 +1,6 @@
 use crate::media::{
-    MediaInfo, MediaLayout, draw_album_art, draw_media_info, draw_playback_controls,
-    draw_progress_bar,
+    MediaInfo, MediaLayout, draw_album_art, draw_media_info, draw_no_media_placeholder,
+    draw_playback_controls, draw_progress_bar,
 };
 use crate::ui::clock::ClockUI;
 use crate::window::NotchController;
@@ -84,7 +84,7 @@ pub fn draw_notch(
             draw_album_art(canvas, album_art, layout.art_rect);
 
             // Draw Track Title & Artist
-            let max_w = (pill_x + (current_w * 0.55) - layout.info_x - (10.0 * scale)).max(60.0 * scale);
+            let max_w = (pill_x + (current_w * 0.5) - layout.info_x - (10.0 * scale)).max(60.0 * scale);
             draw_media_info(
                 canvas,
                 &media_info.title,
@@ -106,7 +106,21 @@ pub fn draw_notch(
 
             // Draw Playback Controls
             draw_playback_controls(canvas, &layout, &controller.btn_anims, scale);
+        } else {
+            // Modern No Media Placeholder Card
+            draw_no_media_placeholder(canvas, pill_x, pill_y, current_w, current_h, scale);
         }
+
+        // Calendar Widget (Right 50% Zone)
+        let cal_layout = crate::calendar::CalendarLayout::compute(
+            pill_x,
+            pill_y,
+            current_w,
+            current_h,
+            scale,
+            &controller.calendar,
+        );
+        crate::calendar::draw_calendar(canvas, &controller.calendar, &cal_layout, scale);
     }
 }
 

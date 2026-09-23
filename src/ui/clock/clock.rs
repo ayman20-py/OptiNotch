@@ -137,7 +137,8 @@ impl ClockUI {
             .font_large
             .measure_str(&time_str, Some(&self.text_paint_primary));
 
-        let time_x = card_x + (card_width * 0.05);
+        let left_margin = 20.0 * (card_height / 180.0).max(1.0);
+        let time_x = card_x + left_margin;
         let time_y = card_y + (card_height * 0.18);
 
         canvas.draw_str(
@@ -148,7 +149,7 @@ impl ClockUI {
         );
 
         // 2. Draw date subtext below the time
-        let date_x = card_x + (card_width * 0.05);
+        let date_x = card_x + left_margin;
         let date_y = time_y + (card_height * 0.1);
 
         canvas.draw_str(
