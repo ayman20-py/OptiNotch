@@ -54,7 +54,11 @@ pub struct CalendarState {
     pub picker_year: u32,          // Year currently displayed in month picker
     pub picker_month: u32,         // Month currently displayed in month picker
     pub view_mode: CalendarViewMode,
+    pub is_google_connected: bool,
     pub mock_events: HashMap<(u32, u32, u32), Vec<CalendarEvent>>, // (Y, M, D) -> Events
+    pub scroll_offset: f32,
+    pub target_scroll: f32,
+    pub max_scroll: f32,
 }
 
 impl CalendarState {
@@ -118,7 +122,11 @@ impl CalendarState {
         );
 
         // Determine which day of the 7-day week today is (0 = Mon, ..., 6 = Sun)
-        let day_of_week = if st.wDayOfWeek == 0 { 6 } else { (st.wDayOfWeek - 1) as usize };
+        let day_of_week = if st.wDayOfWeek == 0 {
+            6
+        } else {
+            (st.wDayOfWeek - 1) as usize
+        };
 
         Self {
             current_year: year,
@@ -132,7 +140,52 @@ impl CalendarState {
             picker_year: year,
             picker_month: month,
             view_mode: CalendarViewMode::WeekAgenda,
+            is_google_connected: false,
             mock_events,
+            scroll_offset: 0.0,
+            target_scroll: 0.0,
+            max_scroll: 0.0,
+        }
+    }
+
+    /// Reset calendar to today's date, current week, and default WeekAgenda view
+    pub fn reset_to_today(&mut self) {
+        let mut st: SYSTEMTIME = unsafe { std::mem::zeroed() };
+        unsafe { GetLocalTime(&mut st) };
+
+        let year = st.wYear as u32;
+        let month = st.wMonth as u32;
+        let day = st.wDay as u32;
+        let dow = if st.wDayOfWeek == 0 {
+            6
+        } else {
+            (st.wDayOfWeek - 1) as usize
+        };
+
+        self.current_year = year;
+        self.current_month = month;
+        self.current_day = day;
+        self.selected_year = year;
+        self.selected_month = month;
+        self.selected_day = day;
+        self.selected_day_index = dow.min(6);
+        self.week_offset_days = 0;
+        self.picker_year = year;
+        self.picker_month = month;
+        self.view_mode = CalendarViewMode::WeekAgenda;
+        self.scroll_offset = 0.0;
+        self.target_scroll = 0.0;
+    }
+
+    /// Update live events from Google Calendar service
+    pub fn update_from_google(
+        &mut self,
+        events: HashMap<(u32, u32, u32), Vec<CalendarEvent>>,
+        is_connected: bool,
+    ) {
+        self.is_google_connected = is_connected;
+        if is_connected {
+            self.mock_events = events;
         }
     }
 
@@ -142,7 +195,11 @@ impl CalendarState {
         unsafe { GetLocalTime(&mut st) };
 
         // 0 = Sunday in Win32, so Monday = 1
-        let dow = if st.wDayOfWeek == 0 { 6 } else { (st.wDayOfWeek - 1) as i32 };
+        let dow = if st.wDayOfWeek == 0 {
+            6
+        } else {
+            (st.wDayOfWeek - 1) as i32
+        };
         let monday_offset = -dow + self.week_offset_days;
 
         let day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -191,8 +248,12 @@ impl CalendarState {
         let prev_m_days = days_in_month(prev_m, prev_y);
         for i in (0..first_dow).rev() {
             let d = prev_m_days - i as u32;
-            let is_today = prev_y == self.current_year && prev_m == self.current_month && d == self.current_day;
-            let is_selected = prev_y == self.selected_year && prev_m == self.selected_month && d == self.selected_day;
+            let is_today = prev_y == self.current_year
+                && prev_m == self.current_month
+                && d == self.current_day;
+            let is_selected = prev_y == self.selected_year
+                && prev_m == self.selected_month
+                && d == self.selected_day;
             let has_events = self.mock_events.contains_key(&(prev_y, prev_m, d));
             cells.push(CalendarMonthCell {
                 day_number: d,
@@ -207,8 +268,10 @@ impl CalendarState {
 
         // Days in current month
         for d in 1..=total_days_in_m {
-            let is_today = y == self.current_year && m == self.current_month && d == self.current_day;
-            let is_selected = y == self.selected_year && m == self.selected_month && d == self.selected_day;
+            let is_today =
+                y == self.current_year && m == self.current_month && d == self.current_day;
+            let is_selected =
+                y == self.selected_year && m == self.selected_month && d == self.selected_day;
             let has_events = self.mock_events.contains_key(&(y, m, d));
             cells.push(CalendarMonthCell {
                 day_number: d,
@@ -227,8 +290,12 @@ impl CalendarState {
             let needed = 7 - rem;
             let (next_m, next_y) = if m == 12 { (1, y + 1) } else { (m + 1, y) };
             for d in 1..=(needed as u32) {
-                let is_today = next_y == self.current_year && next_m == self.current_month && d == self.current_day;
-                let is_selected = next_y == self.selected_year && next_m == self.selected_month && d == self.selected_day;
+                let is_today = next_y == self.current_year
+                    && next_m == self.current_month
+                    && d == self.current_day;
+                let is_selected = next_y == self.selected_year
+                    && next_m == self.selected_month
+                    && d == self.selected_day;
                 let has_events = self.mock_events.contains_key(&(next_y, next_m, d));
                 cells.push(CalendarMonthCell {
                     day_number: d,
@@ -268,6 +335,8 @@ impl CalendarState {
                 self.selected_month = day.month;
                 self.selected_day = day.day_number;
             }
+            self.scroll_offset = 0.0;
+            self.target_scroll = 0.0;
         }
     }
 
@@ -284,16 +353,43 @@ impl CalendarState {
         let target_days = days_from_epoch(year, month, day);
         let diff = target_days - today_days;
 
-        let today_dow = if st.wDayOfWeek == 0 { 6 } else { (st.wDayOfWeek - 1) as i32 };
+        let today_dow = if st.wDayOfWeek == 0 {
+            6
+        } else {
+            (st.wDayOfWeek - 1) as i32
+        };
         let target_dow = day_of_week(day, month, year) as i32;
 
         let target_mon_offset = diff - target_dow;
         let today_mon_offset = -today_dow;
         self.week_offset_days = target_mon_offset - today_mon_offset;
         self.selected_day_index = target_dow as usize;
+        self.scroll_offset = 0.0;
+        self.target_scroll = 0.0;
 
         // Switch back to WeekAgenda view
         self.view_mode = CalendarViewMode::WeekAgenda;
+    }
+
+    pub fn scroll_events(&mut self, delta: f32) {
+        let count = self.get_selected_day_events().len();
+        let total_h = (count as f32) * 29.0;
+        let viewport_h = 75.0;
+        self.max_scroll = (total_h - viewport_h).max(0.0);
+        self.target_scroll = (self.target_scroll + delta).clamp(0.0, self.max_scroll);
+    }
+
+    pub fn update_scroll(&mut self, dt: f32) -> bool {
+        let diff = self.target_scroll - self.scroll_offset;
+        if diff.abs() > 0.5 {
+            self.scroll_offset += diff * (16.0 * dt).min(1.0);
+            true
+        } else if (self.scroll_offset - self.target_scroll).abs() > 0.001 {
+            self.scroll_offset = self.target_scroll;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn open_month_picker(&mut self) {
@@ -306,6 +402,7 @@ impl CalendarState {
         self.view_mode = CalendarViewMode::WeekAgenda;
     }
 
+    #[allow(dead_code)]
     pub fn toggle_month_picker(&mut self) {
         if self.view_mode == CalendarViewMode::MonthPicker {
             self.close_month_picker();
@@ -334,11 +431,15 @@ impl CalendarState {
 
     pub fn prev_week(&mut self) {
         self.week_offset_days -= 7;
+        self.scroll_offset = 0.0;
+        self.target_scroll = 0.0;
         self.sync_selected_date_from_week();
     }
 
     pub fn next_week(&mut self) {
         self.week_offset_days += 7;
+        self.scroll_offset = 0.0;
+        self.target_scroll = 0.0;
         self.sync_selected_date_from_week();
     }
 

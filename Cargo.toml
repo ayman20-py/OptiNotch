@@ -17,6 +17,10 @@ windows-sys = { version = ">=0.59, <=0.61", features = [
     "Win32_System_SystemInformation",
     "Win32_UI_Shell",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Power",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_ProcessStatus",
 ] }
 
 windows = { version = "0.59", features = [
@@ -25,3 +29,16 @@ windows = { version = "0.59", features = [
     "Foundation",
     "Foundation_Collections",
 ] }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+tiny_http = "0.12"
+open = "5.3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

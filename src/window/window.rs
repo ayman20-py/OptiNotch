@@ -28,6 +28,7 @@ static MEDIA_NEXT_FLAG: AtomicBool = AtomicBool::new(false);
 static MEDIA_PREV_FLAG: AtomicBool = AtomicBool::new(false);
 static SWITCH_MONITOR_FLAG: AtomicBool = AtomicBool::new(false);
 static HIDE_NOTCH_FLAG: AtomicBool = AtomicBool::new(false);
+static CALENDAR_CONNECT_FLAG: AtomicBool = AtomicBool::new(false);
 
 static mut ACTIVE_CONTROLLER_PTR: usize = 0;
 static mut ACTIVE_WINDOW_HWND: HWND = 0 as _;
@@ -128,6 +129,24 @@ unsafe extern "system" fn mouse_hook_proc(n_code: i32, wparam: WPARAM, lparam: L
                         ) {
                             COLLAPSE_REQUESTED_FLAG.store(true, Ordering::SeqCst);
                         }
+                    }
+                }
+            }
+        } else if msg == WM_MOUSEWHEEL {
+            unsafe {
+                let hook_struct = &*(lparam as *const MSLLHOOKSTRUCT);
+                let pt = hook_struct.pt;
+
+                if ACTIVE_CONTROLLER_PTR != 0 {
+                    let controller = &mut *(ACTIVE_CONTROLLER_PTR as *mut NotchController);
+                    if controller.state == NotchState::Expanded
+                        && controller.is_inside_screen_rect(ACTIVE_WINDOW_X, ACTIVE_WINDOW_Y, pt.x, pt.y)
+                    {
+                        let wheel_delta = ((hook_struct.mouseData >> 16) & 0xFFFF) as i16 as f32;
+                        let scroll_amount = (wheel_delta / 120.0) * (34.0 * controller.config.scale_factor);
+                        controller.calendar.scroll_events(-scroll_amount);
+                        controller.is_animating = true;
+                        controller.last_frame_time = Some(std::time::Instant::now());
                     }
                 }
             }
@@ -257,8 +276,28 @@ pub unsafe extern "system" fn wnd_proc(
                             controller_mut.is_animating = true;
                             controller_mut.last_frame_time = Some(std::time::Instant::now());
                         }
+                        MediaAction::CalendarConnectGoogle => {
+                            CALENDAR_CONNECT_FLAG.store(true, Ordering::SeqCst);
+                        }
                         MediaAction::None => {}
                     }
+                }
+            }
+            0
+        }
+
+        WM_MOUSEWHEEL => {
+            let controller_ptr = unsafe {
+                GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut NotchController
+            };
+            if !controller_ptr.is_null() {
+                let controller = unsafe { &mut *controller_ptr };
+                if controller.state == NotchState::Expanded {
+                    let wheel_delta = ((wparam >> 16) & 0xFFFF) as i16 as f32;
+                    let scroll_amount = (wheel_delta / 120.0) * (34.0 * controller.config.scale_factor);
+                    controller.calendar.scroll_events(-scroll_amount);
+                    controller.is_animating = true;
+                    controller.last_frame_time = Some(std::time::Instant::now());
                 }
             }
             0
@@ -546,6 +585,10 @@ impl NotchWindow {
 
     pub fn check_switch_monitor(&self) -> bool {
         SWITCH_MONITOR_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    pub fn check_calendar_connect(&self) -> bool {
+        CALENDAR_CONNECT_FLAG.swap(false, Ordering::SeqCst)
     }
 
     pub fn resize_surface(&mut self, new_w: i32, new_h: i32) {

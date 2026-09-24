@@ -1,6 +1,8 @@
 use super::layout::CalendarLayout;
 use super::model::{CalendarState, CalendarViewMode};
-use skia_safe::{Canvas, Color, Font, FontMgr, FontStyle, Paint, RRect, Rect, font::Edging};
+use skia_safe::{
+    font::Edging, Canvas, Color, Font, Paint, PaintStyle, Point, RRect, Rect,
+};
 
 pub fn draw_calendar(
     canvas: &Canvas,
@@ -10,27 +12,9 @@ pub fn draw_calendar(
 ) {
     let s = scale_factor;
 
-    let font_mgr = FontMgr::new();
-    let regular_tf = font_mgr
-        .match_family_style("Google Sans", FontStyle::normal())
-        .or_else(|| font_mgr.match_family_style("Google Sans Display", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Product Sans", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Text", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Inter", FontStyle::normal()))
-        .or_else(|| font_mgr.legacy_make_typeface(None, FontStyle::normal()))
-        .expect("Failed to load typeface for Calendar UI");
-
-    let bold_tf = font_mgr
-        .match_family_style("Google Sans", FontStyle::bold())
-        .or_else(|| font_mgr.match_family_style("Google Sans Display", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Product Sans", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Text", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Inter", FontStyle::bold()))
-        .unwrap_or_else(|| regular_tf.clone());
+    let fonts = crate::ui::font_cache::FontCache::get();
+    let regular_tf = &fonts.regular;
+    let bold_tf = &fonts.bold;
 
     match state.view_mode {
         CalendarViewMode::WeekAgenda => {
@@ -141,85 +125,247 @@ pub fn draw_calendar(
             // =========================================================================
             // 4. Daily Agenda / Google Tasks Feed (Bottom)
             // =========================================================================
-            let events = state.get_selected_day_events();
-            let agenda_y_start = layout.bounds.top + (42.0 * s);
-            let event_spacing = 30.0 * s;
+            let agenda_y_start = layout.bounds.top + (40.0 * s);
 
-            let mut event_title_font = Font::new(bold_tf, 12.0 * s);
-            event_title_font.set_subpixel(true);
-            event_title_font.set_edging(Edging::SubpixelAntiAlias);
+            if !state.is_google_connected {
+                // =====================================================================
+                // Modern Google Calendar Disconnected State Card
+                // =====================================================================
+                let card_x = layout.bounds.left;
+                let card_y = layout.bounds.top + (42.0 * s);
+                let card_w = layout.bounds.width();
+                let card_h = layout.bounds.height() - (48.0 * s);
 
-            let mut event_time_font = Font::new(regular_tf, 10.0 * s);
-            event_time_font.set_subpixel(true);
-            event_time_font.set_edging(Edging::SubpixelAntiAlias);
+                // Subtle Frosted Glass Container Box
+                let card_rect = Rect::from_xywh(card_x, card_y, card_w, card_h);
+                let card_rrect = RRect::new_rect_xy(card_rect, 10.0 * s, 10.0 * s);
 
-            let mut title_paint = Paint::default();
-            title_paint.set_anti_alias(true);
-            title_paint.set_color(Color::from_argb(240, 255, 255, 255));
+                let mut card_bg = Paint::default();
+                card_bg.set_anti_alias(true);
+                card_bg.set_color(Color::from_argb(14, 255, 255, 255));
+                canvas.draw_rrect(card_rrect, &card_bg);
 
-            let mut time_paint = Paint::default();
-            time_paint.set_anti_alias(true);
-            time_paint.set_color(Color::from_argb(120, 255, 255, 255));
+                let mut card_border = Paint::default();
+                card_border.set_anti_alias(true);
+                card_border.set_style(PaintStyle::Stroke);
+                card_border.set_stroke_width(1.0);
+                card_border.set_color(Color::from_argb(25, 255, 255, 255));
+                canvas.draw_rrect(card_rrect, &card_border);
 
-            if events.is_empty() {
-                let empty_y = agenda_y_start + (14.0 * s);
-                let mut empty_paint = Paint::default();
-                empty_paint.set_anti_alias(true);
-                empty_paint.set_color(Color::from_argb(90, 255, 255, 255));
-                canvas.draw_str(
-                    "No events scheduled",
-                    (month_x + (4.0 * s), empty_y),
-                    &event_time_font,
-                    &empty_paint,
+                let cx = card_x + (card_w / 2.0);
+
+                // Row 1: Google Calendar Icon + Title
+                let icon_size = 15.0 * s;
+                let title_font = Font::new(bold_tf.clone(), 11.5 * s);
+                let mut title_paint = Paint::default();
+                title_paint.set_anti_alias(true);
+                title_paint.set_color(Color::from_argb(240, 255, 255, 255));
+
+                let title_text = "Google Calendar";
+                let (tw, _) = title_font.measure_str(title_text, Some(&title_paint));
+                let total_header_w = icon_size + (7.0 * s) + tw;
+                let header_start_x = cx - (total_header_w / 2.0);
+                let header_y = card_y + (12.0 * s);
+
+                // Calendar Vector Icon
+                let icon_box = Rect::from_xywh(header_start_x, header_y, icon_size, icon_size);
+                let icon_rrect = RRect::new_rect_xy(icon_box, 3.5 * s, 3.5 * s);
+                let mut icon_bg = Paint::default();
+                icon_bg.set_anti_alias(true);
+                icon_bg.set_color(Color::from_argb(35, 255, 255, 255));
+                canvas.draw_rrect(icon_rrect, &icon_bg);
+
+                let mut cal_top = Paint::default();
+                cal_top.set_anti_alias(true);
+                cal_top.set_color(Color::from_argb(240, 66, 133, 244));
+                let top_rect = Rect::from_xywh(header_start_x, header_y, icon_size, 4.2 * s);
+                let top_rrect = RRect::new_rect_radii(
+                    top_rect,
+                    &[
+                        Point::new(3.5 * s, 3.5 * s),
+                        Point::new(3.5 * s, 3.5 * s),
+                        Point::new(0.0, 0.0),
+                        Point::new(0.0, 0.0),
+                    ],
                 );
+                canvas.draw_rrect(top_rrect, &cal_top);
+
+                // Header Title text
+                let text_x = header_start_x + icon_size + (7.0 * s);
+                let (_, tmetrics) = title_font.metrics();
+                let text_y =
+                    header_y + (icon_size / 2.0) - (tmetrics.ascent + tmetrics.descent) / 2.0;
+                canvas.draw_str(title_text, (text_x, text_y), &title_font, &title_paint);
+
+                // Row 2: Subtitle
+                let mut sub_font = Font::new(regular_tf.clone(), 9.0 * s);
+                sub_font.set_subpixel(true);
+                sub_font.set_edging(Edging::SubpixelAntiAlias);
+
+                let mut sub_paint = Paint::default();
+                sub_paint.set_anti_alias(true);
+                sub_paint.set_color(Color::from_argb(125, 255, 255, 255));
+
+                // Row 3: Modern Connect Pill Button
+                let btn_rect = layout.connect_google_btn;
+                if !btn_rect.is_empty() {
+                    let btn_rrect = RRect::new_rect_xy(btn_rect, 12.0 * s, 12.0 * s);
+
+                    let mut btn_bg = Paint::default();
+                    btn_bg.set_anti_alias(true);
+                    btn_bg.set_color(Color::from_argb(225, 26, 115, 232)); // Google Accent Blue Pill
+                    canvas.draw_rrect(btn_rrect, &btn_bg);
+
+                    let mut btn_stroke = Paint::default();
+                    btn_stroke.set_anti_alias(true);
+                    btn_stroke.set_style(PaintStyle::Stroke);
+                    btn_stroke.set_stroke_width(1.0 * s);
+                    btn_stroke.set_color(Color::from_argb(80, 255, 255, 255));
+                    canvas.draw_rrect(btn_rrect, &btn_stroke);
+
+                    let mut btn_font = Font::new(bold_tf.clone(), 10.0 * s);
+                    btn_font.set_subpixel(true);
+                    btn_font.set_edging(Edging::SubpixelAntiAlias);
+
+                    let mut btn_text_paint = Paint::default();
+                    btn_text_paint.set_anti_alias(true);
+                    btn_text_paint.set_color(Color::from_argb(255, 255, 255, 255));
+
+                    let btn_label = "+ Connect Account";
+                    let (btn_tw, _) = btn_font.measure_str(btn_label, Some(&btn_text_paint));
+                    let (_, btn_metrics) = btn_font.metrics();
+                    let btn_tx = btn_rect.left + (btn_rect.width() - btn_tw) / 2.0;
+                    let btn_ty = btn_rect.top + (btn_rect.height() / 2.0)
+                        - (btn_metrics.ascent + btn_metrics.descent) / 2.0;
+                    canvas.draw_str(btn_label, (btn_tx, btn_ty), &btn_font, &btn_text_paint);
+                }
             } else {
-                for (i, event) in events.iter().take(2).enumerate() {
-                    let ey = agenda_y_start + (i as f32 * event_spacing);
+                let events = state.get_selected_day_events();
+                let event_spacing = 29.0 * s; // Clean, compact spacing between events
 
-                    // Left vertical accent bar
-                    let bar_rect = Rect::from_xywh(month_x + (2.0 * s), ey, 2.5 * s, 22.0 * s);
-                    let bar_rrect = RRect::new_rect_xy(bar_rect, 1.2 * s, 1.2 * s);
-                    let mut bar_paint = Paint::default();
-                    bar_paint.set_anti_alias(true);
-                    bar_paint.set_color(Color::from_argb(
-                        255,
-                        event.color_rgb.0,
-                        event.color_rgb.1,
-                        event.color_rgb.2,
-                    ));
-                    canvas.draw_rrect(bar_rrect, &bar_paint);
+                let mut event_title_font = Font::new(bold_tf, 11.5 * s);
+                event_title_font.set_subpixel(true);
+                event_title_font.set_edging(Edging::SubpixelAntiAlias);
 
-                    // Event Title
-                    let title_x = month_x + (12.0 * s);
-                    let title_y = ey + (9.0 * s);
+                let mut event_time_font = Font::new(regular_tf, 9.5 * s);
+                event_time_font.set_subpixel(true);
+                event_time_font.set_edging(Edging::SubpixelAntiAlias);
 
-                    let max_title_w = layout.bounds.width() - (16.0 * s);
-                    let mut display_title = event.title.clone();
-                    let (mut tw, _) = event_title_font.measure_str(&display_title, Some(&title_paint));
-                    if tw > max_title_w && max_title_w > 0.0 {
-                        let mut chars = event.title.chars().collect::<Vec<_>>();
-                        while !chars.is_empty() && tw > max_title_w {
-                            chars.pop();
-                            display_title = format!("{}...", chars.iter().collect::<String>());
-                            let (w, _) = event_title_font.measure_str(&display_title, Some(&title_paint));
-                            tw = w;
-                        }
-                    }
+                let mut title_paint = Paint::default();
+                title_paint.set_anti_alias(true);
+                title_paint.set_color(Color::from_argb(240, 255, 255, 255));
+
+                let mut time_paint = Paint::default();
+                time_paint.set_anti_alias(true);
+                time_paint.set_color(Color::from_argb(120, 255, 255, 255));
+
+                if events.is_empty() {
+                    let empty_y = agenda_y_start + (14.0 * s);
+                    let mut empty_paint = Paint::default();
+                    empty_paint.set_anti_alias(true);
+                    empty_paint.set_color(Color::from_argb(90, 255, 255, 255));
                     canvas.draw_str(
-                        &display_title,
-                        (title_x, title_y),
-                        &event_title_font,
-                        &title_paint,
-                    );
-
-                    // Event Time / Duration
-                    let time_y = title_y + (13.0 * s);
-                    canvas.draw_str(
-                        &event.time_str,
-                        (title_x, time_y),
+                        "No events scheduled",
+                        (month_x + (4.0 * s), empty_y),
                         &event_time_font,
-                        &time_paint,
+                        &empty_paint,
                     );
+                } else {
+                    let viewport_top = layout.bounds.top + (38.0 * s);
+                    let viewport_h = (layout.bounds.bottom - viewport_top).max(10.0);
+                    let clip_rect = Rect::from_xywh(
+                        layout.bounds.left - (4.0 * s),
+                        viewport_top,
+                        layout.bounds.width() + (8.0 * s),
+                        viewport_h,
+                    );
+
+                    let total_content_height = (events.len() as f32) * event_spacing;
+                    let max_scroll = (total_content_height - viewport_h + (4.0 * s)).max(0.0);
+
+                    // 1. Clip and render all events with scroll offset
+                    canvas.save();
+                    canvas.clip_rect(clip_rect, None, true);
+
+                    let start_y = viewport_top + (2.0 * s) - state.scroll_offset;
+
+                    for (i, event) in events.iter().enumerate() {
+                        let ey = start_y + (i as f32 * event_spacing);
+
+                        // Culling optimization for offscreen items
+                        if ey + event_spacing < viewport_top - (10.0 * s)
+                            || ey > layout.bounds.bottom + (10.0 * s)
+                        {
+                            continue;
+                        }
+
+                        // Left vertical accent bar matching Google Calendar event color
+                        let bar_rect = Rect::from_xywh(month_x + (2.0 * s), ey, 2.5 * s, 20.0 * s);
+                        let bar_rrect = RRect::new_rect_xy(bar_rect, 1.2 * s, 1.2 * s);
+                        let mut bar_paint = Paint::default();
+                        bar_paint.set_anti_alias(true);
+                        bar_paint.set_color(Color::from_argb(
+                            255,
+                            event.color_rgb.0,
+                            event.color_rgb.1,
+                            event.color_rgb.2,
+                        ));
+                        canvas.draw_rrect(bar_rrect, &bar_paint);
+
+                        // Event Title
+                        let title_x = month_x + (12.0 * s);
+                        let title_y = ey + (8.5 * s);
+
+                        let max_title_w = layout.bounds.width() - (18.0 * s);
+                        let mut display_title = event.title.clone();
+                        let (mut tw, _) =
+                            event_title_font.measure_str(&display_title, Some(&title_paint));
+                        if tw > max_title_w && max_title_w > 0.0 {
+                            let mut chars = event.title.chars().collect::<Vec<_>>();
+                            while !chars.is_empty() && tw > max_title_w {
+                                chars.pop();
+                                display_title = format!("{}...", chars.iter().collect::<String>());
+                                let (w, _) = event_title_font
+                                    .measure_str(&display_title, Some(&title_paint));
+                                tw = w;
+                            }
+                        }
+                        canvas.draw_str(
+                            &display_title,
+                            (title_x, title_y),
+                            &event_title_font,
+                            &title_paint,
+                        );
+
+                        // Event Time / Duration
+                        let time_y = title_y + (14.0 * s);
+                        canvas.draw_str(
+                            &event.time_str,
+                            (title_x, time_y),
+                            &event_time_font,
+                            &time_paint,
+                        );
+                    }
+
+                    canvas.restore();
+
+                    // 2. Modern Subtle Scrollbar indicator when scrollable
+                    if max_scroll > 0.0 {
+                        let scroll_ratio = (state.scroll_offset / max_scroll).clamp(0.0, 1.0);
+                        let scrollbar_h = (viewport_h * (viewport_h / total_content_height))
+                            .clamp(14.0 * s, viewport_h * 0.6);
+                        let track_h = viewport_h - scrollbar_h;
+                        let scrollbar_y = viewport_top + (scroll_ratio * track_h);
+                        let scrollbar_x = layout.bounds.right - (2.0 * s);
+
+                        let sb_rect =
+                            Rect::from_xywh(scrollbar_x, scrollbar_y, 2.0 * s, scrollbar_h);
+                        let sb_rrect = RRect::new_rect_xy(sb_rect, 1.0 * s, 1.0 * s);
+                        let mut sb_paint = Paint::default();
+                        sb_paint.set_anti_alias(true);
+                        sb_paint.set_color(Color::from_argb(60, 255, 255, 255));
+                        canvas.draw_rrect(sb_rrect, &sb_paint);
+                    }
                 }
             }
         }
@@ -253,11 +399,13 @@ pub fn draw_calendar(
             nav_paint.set_color(Color::from_argb(140, 255, 255, 255));
 
             let (prev_w, _) = nav_font.measure_str("‹", Some(&nav_paint));
-            let prev_x = layout.picker_prev_btn.left + (layout.picker_prev_btn.width() - prev_w) / 2.0;
+            let prev_x =
+                layout.picker_prev_btn.left + (layout.picker_prev_btn.width() - prev_w) / 2.0;
             canvas.draw_str("‹", (prev_x, title_y), &nav_font, &nav_paint);
 
             let (next_w, _) = nav_font.measure_str("›", Some(&nav_paint));
-            let next_btn_x = layout.picker_next_btn.left + (layout.picker_next_btn.width() - next_w) / 2.0;
+            let next_btn_x =
+                layout.picker_next_btn.left + (layout.picker_next_btn.width() - next_w) / 2.0;
             canvas.draw_str("›", (next_btn_x, title_y), &nav_font, &nav_paint);
 
             // Close / Back button (✕)
@@ -270,8 +418,14 @@ pub fn draw_calendar(
             close_paint.set_color(Color::from_argb(130, 255, 255, 255));
 
             let (close_w, _) = close_font.measure_str("✕", Some(&close_paint));
-            let close_x = layout.picker_close_btn.left + (layout.picker_close_btn.width() - close_w) / 2.0;
-            canvas.draw_str("✕", (close_x, title_y - (0.5 * s)), &close_font, &close_paint);
+            let close_x =
+                layout.picker_close_btn.left + (layout.picker_close_btn.width() - close_w) / 2.0;
+            canvas.draw_str(
+                "✕",
+                (close_x, title_y - (0.5 * s)),
+                &close_font,
+                &close_paint,
+            );
 
             // =========================================================================
             // 2. Weekday Header (Mo Tu We Th Fr Sa Su)
@@ -355,4 +509,3 @@ pub fn draw_calendar(
         }
     }
 }
-

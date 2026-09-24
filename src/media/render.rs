@@ -1,15 +1,14 @@
 use super::layout::MediaLayout;
 use crate::window::state::ButtonAnimations;
 use skia_safe::{
-    font::Edging, Canvas, Color, Font, FontMgr, FontStyle, Image, Paint, PaintStyle, PathBuilder,
-    Point, RRect, Rect,
+    font::Edging, Canvas, Color, Font, Image, Paint, PaintStyle, PathBuilder, Point, RRect, Rect,
 };
 
 pub fn draw_no_media_placeholder(
     canvas: &Canvas,
     pill_x: f32,
     pill_y: f32,
-    current_w: f32,
+    _current_w: f32,
     current_h: f32,
     scale_factor: f32,
 ) {
@@ -44,21 +43,10 @@ pub fn draw_no_media_placeholder(
     }
 
     // 2. Typography
-    let font_mgr = FontMgr::new();
-    let typeface = font_mgr
-        .match_family_style("Google Sans", FontStyle::normal())
-        .or_else(|| font_mgr.match_family_style("Google Sans Display", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Product Sans", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Text", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Inter", FontStyle::normal()))
-        .or_else(|| font_mgr.legacy_make_typeface(None, FontStyle::normal()))
-        .expect("Failed to load typeface for no media placeholder");
-
+    let fonts = crate::ui::font_cache::FontCache::get();
     let text_x = icon_cx + (22.0 * s);
 
-    let mut title_font = Font::new(typeface, 13.0 * s);
+    let mut title_font = Font::new(fonts.regular.clone(), 13.0 * s);
     title_font.set_subpixel(true);
     title_font.set_edging(Edging::SubpixelAntiAlias);
 
@@ -112,30 +100,10 @@ pub fn draw_media_info(
     max_width: f32,
     scale_factor: f32,
 ) {
-    let font_mgr = FontMgr::new();
-    let regular_tf = font_mgr
-        .match_family_style("Google Sans", FontStyle::normal())
-        .or_else(|| font_mgr.match_family_style("Google Sans Display", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Product Sans", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Text", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::normal()))
-        .or_else(|| font_mgr.match_family_style("Inter", FontStyle::normal()))
-        .or_else(|| font_mgr.legacy_make_typeface(None, FontStyle::normal()))
-        .expect("Failed to load typeface for media info");
-
-    let bold_tf = font_mgr
-        .match_family_style("Google Sans", FontStyle::bold())
-        .or_else(|| font_mgr.match_family_style("Google Sans Display", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Product Sans", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Display", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI Variable Text", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::bold()))
-        .or_else(|| font_mgr.match_family_style("Inter", FontStyle::bold()))
-        .unwrap_or_else(|| regular_tf.clone());
+    let fonts = crate::ui::font_cache::FontCache::get();
 
     // 1. Title
-    let mut title_font = Font::new(bold_tf, 14.0 * scale_factor);
+    let mut title_font = Font::new(fonts.bold.clone(), 14.0 * scale_factor);
     title_font.set_subpixel(true);
     title_font.set_edging(Edging::SubpixelAntiAlias);
 
@@ -160,7 +128,7 @@ pub fn draw_media_info(
     canvas.draw_str(&display_title, (x, title_y), &title_font, &title_paint);
 
     // 2. Artist
-    let mut artist_font = Font::new(regular_tf, 12.0 * scale_factor);
+    let mut artist_font = Font::new(fonts.regular.clone(), 12.0 * scale_factor);
     artist_font.set_subpixel(true);
     artist_font.set_edging(Edging::SubpixelAntiAlias);
 
@@ -235,14 +203,8 @@ pub fn draw_progress_bar(
     canvas.draw_circle((x + fill_w, y + bar_height / 2.0), 4.0 * scale_factor, &thumb_paint);
 
     // 4. Timestamps
-    let font_mgr = FontMgr::new();
-    let typeface = font_mgr
-        .match_family_style("Segoe UI Variable Display", FontStyle::normal())
-        .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::normal()))
-        .or_else(|| font_mgr.legacy_make_typeface(None, FontStyle::normal()))
-        .expect("Failed to load timestamp font");
-
-    let mut time_font = Font::new(typeface, 10.0 * scale_factor);
+    let fonts = crate::ui::font_cache::FontCache::get();
+    let mut time_font = Font::new(fonts.regular.clone(), 10.0 * scale_factor);
     time_font.set_subpixel(true);
     time_font.set_edging(Edging::SubpixelAntiAlias);
 

@@ -21,6 +21,7 @@ pub enum MediaAction {
     CalendarPrevMonth,
     CalendarNextMonth,
     CalendarSelectPickerDate { year: u32, month: u32, day: u32 },
+    CalendarConnectGoogle,
     None,
 }
 
@@ -40,8 +41,8 @@ impl NotchConfig {
     pub fn new(scale_factor: f32) -> Self {
         let collapsed_width = 100.0 * scale_factor;
         let collapsed_height = 28.0 * scale_factor;
-        let expanded_width = 500.0 * scale_factor;
-        let expanded_height = 180.0 * scale_factor;
+        let expanded_width = 570.0 * scale_factor;
+        let expanded_height = 185.0 * scale_factor;
         let top_padding = 6.0 * scale_factor;
 
         let canvas_width = expanded_width + 40.0 * scale_factor;
@@ -115,6 +116,8 @@ pub struct ButtonAnimations {
     pub next_scale: Spring,
     pub next_nudge: Spring,
     pub monitor_scale: Spring,
+    pub monitor_glow: Spring,
+    pub monitor_rotate: Spring,
 }
 
 impl ButtonAnimations {
@@ -127,6 +130,8 @@ impl ButtonAnimations {
             next_scale: Spring::new(1.0, 520.0, 26.0),
             next_nudge: Spring::new(0.0, 480.0, 24.0),
             monitor_scale: Spring::new(1.0, 520.0, 26.0),
+            monitor_glow: Spring::new(0.0, 380.0, 24.0),
+            monitor_rotate: Spring::new(0.0, 440.0, 22.0),
         }
     }
 
@@ -138,8 +143,10 @@ impl ButtonAnimations {
         let a5 = self.next_scale.update(dt);
         let a6 = self.next_nudge.update(dt);
         let a7 = self.monitor_scale.update(dt);
+        let a8 = self.monitor_glow.update(dt);
+        let a9 = self.monitor_rotate.update(dt);
 
-        a1 || a2 || a3 || a4 || a5 || a6 || a7
+        a1 || a2 || a3 || a4 || a5 || a6 || a7 || a8 || a9
     }
 }
 
@@ -196,6 +203,7 @@ impl NotchController {
 
     pub fn expand(&mut self) {
         if self.state != NotchState::Expanded {
+            self.calendar.reset_to_today();
             self.state = NotchState::Expanded;
             self.width_spring.set_target(self.config.expanded_width);
             self.height_spring.set_target(self.config.expanded_height);
@@ -237,7 +245,9 @@ impl NotchController {
     }
 
     pub fn trigger_monitor_press(&mut self) {
-        self.btn_anims.monitor_scale.current = 0.78;
+        self.btn_anims.monitor_scale.current = 0.70;
+        self.btn_anims.monitor_glow.current = 1.0;
+        self.btn_anims.monitor_rotate.current = 14.0;
         self.is_animating = true;
         self.last_frame_time = Some(Instant::now());
     }
@@ -303,8 +313,9 @@ impl NotchController {
         let op_active = self.opacity_spring.update(dt);
         let sc_active = self.scale_spring.update(dt);
         let btn_active = self.btn_anims.update(dt);
+        let scroll_active = self.calendar.update_scroll(dt);
 
-        self.is_animating = w_active || h_active || op_active || sc_active || btn_active;
+        self.is_animating = w_active || h_active || op_active || sc_active || btn_active || scroll_active;
         self.is_animating
     }
 
@@ -335,10 +346,11 @@ impl NotchController {
         let pill_y = 0.0;
 
         // 1. Check Header Monitor Switch Button (Top Right)
-        let mon_btn_size = 32.0 * scale;
-        let mon_btn_x = pill_x + current_w - (38.0 * scale);
+        let mon_btn_w = 44.0 * scale;
+        let mon_btn_h = 28.0 * scale;
+        let mon_btn_x = pill_x + current_w - (56.0 * scale);
         let mon_btn_y = pill_y + (8.0 * scale);
-        let mon_rect = skia_safe::Rect::from_xywh(mon_btn_x, mon_btn_y, mon_btn_size, mon_btn_size);
+        let mon_rect = skia_safe::Rect::from_xywh(mon_btn_x, mon_btn_y, mon_btn_w, mon_btn_h);
         if mon_rect.contains(skia_safe::Point::new(local_x, local_y)) {
             return MediaAction::SwitchMonitor;
         }
@@ -370,6 +382,7 @@ impl NotchController {
             crate::calendar::CalendarAction::SelectPickerDate { year, month, day } => {
                 MediaAction::CalendarSelectPickerDate { year, month, day }
             }
+            crate::calendar::CalendarAction::ConnectGoogle => MediaAction::CalendarConnectGoogle,
             crate::calendar::CalendarAction::None => MediaAction::None,
         }
     }

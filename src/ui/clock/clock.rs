@@ -1,4 +1,5 @@
-use skia_safe::{Canvas, Color, Font, FontMgr, FontStyle, Paint, font::Edging};
+use crate::ui::font_cache::FontCache;
+use skia_safe::{font::Edging, Canvas, Color, Font, Paint};
 use windows_sys::Win32::Foundation::SYSTEMTIME;
 use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 
@@ -12,12 +13,8 @@ pub struct ClockUI {
 
 impl ClockUI {
     pub fn new(scale_factor: f32) -> Self {
-        let font_mgr = FontMgr::new();
-        let typeface = font_mgr
-            .match_family_style("Lilita One", FontStyle::normal())
-            .or_else(|| font_mgr.match_family_style("Segoe UI", FontStyle::normal()))
-            .or_else(|| font_mgr.legacy_make_typeface(None, FontStyle::normal()))
-            .expect("Failed to load typeface for Clock UI");
+        let fonts = FontCache::get();
+        let typeface = &fonts.clock;
 
         // Compact font
         let mut font_compact = Font::new(typeface.clone(), 15.0 * scale_factor);
@@ -126,7 +123,7 @@ impl ClockUI {
         canvas: &Canvas,
         card_x: f32,
         card_y: f32,
-        card_width: f32,
+        _card_width: f32,
         card_height: f32,
     ) {
         let time_str = self.get_time_string();

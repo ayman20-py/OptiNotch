@@ -6,17 +6,21 @@ mod window;
 
 use media::MediaManager;
 use ui::clock::ClockUI;
-use window::{NotchConfig, NotchController, NotchWindow, TrayIcon};
+use ui::system_status::SystemStatusTracker;
+use window::{NotchConfig, NotchController, NotchState, NotchWindow, TrayIcon};
 use windows_sys::Win32::Graphics::Dwm::DwmFlush;
+use windows_sys::Win32::System::ProcessStatus::EmptyWorkingSet;
+use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::UI::HiDpi::{
-    GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, PeekMessageW, SetTimer, TranslateMessage, MSG, PM_REMOVE,
-    WM_QUIT, WM_TIMER,
+    DispatchMessageW, GetMessageW, KillTimer, MSG, PM_REMOVE, PeekMessageW, SetTimer,
+    TranslateMessage, WM_QUIT, WM_TIMER,
 };
 
 const TIMER_CLOCK_ID: usize = 1;
+const TIMER_STATUS_ID: usize = 2;
 
 fn main() {
     // 1. Enable Per-Monitor DPI Awareness V2
@@ -27,12 +31,14 @@ fn main() {
     let dpi = unsafe { GetDpiForSystem() } as f32;
     let scale_factor = dpi / 96.0;
 
-    // 2. Setup Config, Controller, Window, Clock UI, and Media Manager
+    // 2. Setup Config, Controller, Window, Clock UI, Media Manager, System Status Tracker
     let config = NotchConfig::new(scale_factor);
     let mut controller = NotchController::new(config);
     let mut notch = NotchWindow::new(&mut controller);
     let mut clock_ui = ClockUI::new(scale_factor);
     let mut media_manager = MediaManager::new();
+    let calendar_service = calendar::GoogleCalendarService::new();
+    let system_status = SystemStatusTracker::new();
 
     // 3. Register System Tray Icon
     let tray = TrayIcon::new(notch.hwnd, 100, "OptiNotch - Click to toggle");
@@ -44,6 +50,13 @@ fn main() {
 
     // 5. Initial Render
     let (media_info, album_art) = media_manager.get_state();
+    let events = calendar_service.get_events();
+    let is_connected = calendar_service.state.lock().unwrap().is_authenticated;
+    controller.calendar.update_from_google(events, is_connected);
+
+    let battery = system_status.get_battery();
+    let volume = system_status.get_volume();
+
     notch.render(|canvas| {
         render::draw_notch(
             canvas,
@@ -53,10 +66,16 @@ fn main() {
             &clock_ui,
             &media_info,
             album_art,
+            &battery,
+            &volume,
         );
     });
 
-    println!("OptiNotch running! Multi-monitor scaling & controls active.");
+    unsafe {
+        EmptyWorkingSet(GetCurrentProcess());
+    }
+
+    println!("OptiNotch running! System Status & Google Calendar Delta Sync active.");
 
     // 6. Main Event Loop with Hardware VSync
     unsafe {
@@ -71,11 +90,19 @@ fn main() {
             // Expand when user clicks the collapsed notch
             if notch.check_expand_requested() {
                 controller.expand();
+                calendar_service.request_sync();
+                SetTimer(notch.hwnd, TIMER_STATUS_ID, 60, None);
             }
+
+            // Sync latest Google Calendar events into controller
+            let events = calendar_service.get_events();
+            let is_connected = calendar_service.state.lock().unwrap().is_authenticated;
+            controller.calendar.update_from_google(events, is_connected);
 
             // Collapse when user clicks outside the expanded card
             if notch.check_collapse_requested() {
                 controller.collapse();
+                KillTimer(notch.hwnd, TIMER_STATUS_ID);
             }
 
             let (media_info, _album_art) = media_manager.get_state();
@@ -96,6 +123,11 @@ fn main() {
                 media_manager.skip_previous();
             }
 
+            // Google Calendar Connect Button Click
+            if notch.check_calendar_connect() {
+                calendar_service.start_oauth_flow();
+            }
+
             // Monitor Switch Button Click
             if notch.check_switch_monitor() {
                 controller.trigger_monitor_press();
@@ -103,6 +135,9 @@ fn main() {
                 clock_ui = ClockUI::new(new_scale);
 
                 let (media_info, album_art) = media_manager.get_state();
+                let battery = system_status.get_battery();
+                let volume = system_status.get_volume();
+
                 notch.render(|canvas| {
                     render::draw_notch(
                         canvas,
@@ -112,6 +147,8 @@ fn main() {
                         &clock_ui,
                         &media_info,
                         album_art,
+                        &battery,
+                        &volume,
                     );
                 });
             }
@@ -127,7 +164,15 @@ fn main() {
                 // ============================================================
                 controller.step_animation();
 
+                // If animation just completed and we're back in collapsed state, trim memory working set
+                if !controller.is_animating && controller.state == NotchState::Collapsed {
+                    EmptyWorkingSet(GetCurrentProcess());
+                }
+
                 let (media_info, album_art) = media_manager.get_state();
+                let battery = system_status.get_battery();
+                let volume = system_status.get_volume();
+
                 notch.render(|canvas| {
                     render::draw_notch(
                         canvas,
@@ -137,6 +182,8 @@ fn main() {
                         &clock_ui,
                         &media_info,
                         album_art,
+                        &battery,
+                        &volume,
                     );
                 });
 
@@ -160,8 +207,13 @@ fn main() {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
 
-                if msg.message == WM_TIMER && msg.wParam == TIMER_CLOCK_ID {
+                if msg.message == WM_TIMER
+                    && (msg.wParam == TIMER_CLOCK_ID || msg.wParam == TIMER_STATUS_ID)
+                {
                     let (media_info, album_art) = media_manager.get_state();
+                    let battery = system_status.get_battery();
+                    let volume = system_status.get_volume();
+
                     notch.render(|canvas| {
                         render::draw_notch(
                             canvas,
@@ -171,6 +223,8 @@ fn main() {
                             &clock_ui,
                             &media_info,
                             album_art,
+                            &battery,
+                            &volume,
                         );
                     });
                 }

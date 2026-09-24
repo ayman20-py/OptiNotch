@@ -24,11 +24,11 @@ impl MediaLayout {
         let art_gap = 10.0 * scale;
         let info_x = art_x + art_size + art_gap;
         let info_y = art_y + (art_size * 0.04);
-        let media_w = current_w * 0.5;
+        let media_w = current_w * 0.45;
         let max_w = (pill_x + media_w - info_x - (8.0 * scale)).max(60.0 * scale);
 
         let bar_y = info_y + (48.0 * scale);
-        let bar_w = (175.0 * scale).min(max_w);
+        let bar_w = (180.0 * scale).min(max_w);
         let bar_rect = Rect::from_xywh(info_x, bar_y, bar_w, 3.5 * scale);
 
         let controls_cx = info_x + bar_w / 2.0;
