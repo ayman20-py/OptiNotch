@@ -10,7 +10,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::state::{MediaAction, NotchController, NotchState};
-use super::tray::{IDM_EXIT, IDM_TOGGLE, WM_TRAY_ICON};
+use super::tray::{IDM_AUTOSTART, IDM_CHECK_UPDATES, IDM_EXIT, IDM_TOGGLE, WM_TRAY_ICON};
 
 const HOTKEY_TOGGLE_ID: i32 = 1001;
 
@@ -22,6 +22,7 @@ const VK_OEM_5: u32 = 0xDC;
 static EXPAND_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 static COLLAPSE_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 static SHOW_TRAY_MENU_FLAG: AtomicBool = AtomicBool::new(false);
+static CHECK_UPDATES_FLAG: AtomicBool = AtomicBool::new(false);
 static EXIT_REQUESTED_FLAG: AtomicBool = AtomicBool::new(false);
 static MEDIA_TOGGLE_FLAG: AtomicBool = AtomicBool::new(false);
 static MEDIA_NEXT_FLAG: AtomicBool = AtomicBool::new(false);
@@ -339,6 +340,11 @@ pub unsafe extern "system" fn wnd_proc(
                         COLLAPSE_REQUESTED_FLAG.store(true, Ordering::SeqCst);
                     }
                 }
+            } else if cmd_id == IDM_AUTOSTART {
+                let enabled = crate::autostart::is_autostart_enabled();
+                let _ = crate::autostart::set_autostart(!enabled);
+            } else if cmd_id == IDM_CHECK_UPDATES {
+                CHECK_UPDATES_FLAG.store(true, Ordering::SeqCst);
             } else if cmd_id == IDM_EXIT {
                 EXIT_REQUESTED_FLAG.store(true, Ordering::SeqCst);
                 unsafe { DestroyWindow(hwnd) };
@@ -565,6 +571,10 @@ impl NotchWindow {
 
     pub fn check_show_tray_menu(&self) -> bool {
         SHOW_TRAY_MENU_FLAG.swap(false, Ordering::SeqCst)
+    }
+
+    pub fn check_check_updates(&self) -> bool {
+        CHECK_UPDATES_FLAG.swap(false, Ordering::SeqCst)
     }
 
     pub fn check_exit_requested(&self) -> bool {

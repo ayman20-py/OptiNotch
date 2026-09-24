@@ -1,8 +1,17 @@
+#![windows_subsystem = "windows"]
+
+mod autostart;
 mod calendar;
+mod installer;
 mod media;
 mod render;
 mod ui;
+mod updater;
 mod window;
+
+fn to_wide_str(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
 
 use media::MediaManager;
 use ui::clock::ClockUI;
@@ -23,6 +32,11 @@ const TIMER_CLOCK_ID: usize = 1;
 const TIMER_STATUS_ID: usize = 2;
 
 fn main() {
+    // 0. Check CLI args and handle 1-Click Installer / Portable mode
+    if !installer::handle_startup_and_installer() {
+        return;
+    }
+
     // 1. Enable Per-Monitor DPI Awareness V2
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -156,6 +170,64 @@ fn main() {
             // Check if user right-clicked tray icon -> show context menu
             if notch.check_show_tray_menu() {
                 tray.show_context_menu();
+            }
+
+            // Check for updates command from tray menu
+            if notch.check_check_updates() {
+                std::thread::spawn(|| {
+                    match updater::check_for_updates() {
+                        Ok(Some(info)) => {
+                            if info.is_newer {
+                                let msg = format!(
+                                    "A new version is available: {}\n\n{}\n\nWould you like to download and apply the update now?",
+                                    info.tag_name,
+                                    info.body
+                                );
+                                let title = "OptiNotch Update Available";
+                                let result = windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                                    0 as _,
+                                    to_wide_str(&msg).as_ptr(),
+                                    to_wide_str(title).as_ptr(),
+                                    windows_sys::Win32::UI::WindowsAndMessaging::MB_YESNO
+                                        | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION,
+                                );
+                                if result == windows_sys::Win32::UI::WindowsAndMessaging::IDYES {
+                                    if let Err(e) = updater::apply_update(&info.download_url) {
+                                        eprintln!("[Update error] {}", e);
+                                    }
+                                }
+                            } else {
+                                let msg = format!("You are up to date! (OptiNotch v{})", updater::CURRENT_VERSION);
+                                windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                                    0 as _,
+                                    to_wide_str(&msg).as_ptr(),
+                                    to_wide_str("OptiNotch").as_ptr(),
+                                    windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
+                                        | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION,
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                                0 as _,
+                                to_wide_str("Could not find any releases on GitHub.").as_ptr(),
+                                to_wide_str("OptiNotch Update").as_ptr(),
+                                windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
+                                    | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING,
+                            );
+                        }
+                        Err(e) => {
+                            let err_msg = format!("Failed to check for updates:\n{}", e);
+                            windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                                0 as _,
+                                to_wide_str(&err_msg).as_ptr(),
+                                to_wide_str("OptiNotch Update Error").as_ptr(),
+                                windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
+                                    | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR,
+                            );
+                        }
+                    }
+                });
             }
 
             if controller.is_animating {

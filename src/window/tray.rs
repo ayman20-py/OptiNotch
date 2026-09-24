@@ -7,7 +7,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 pub const WM_TRAY_ICON: u32 = WM_USER + 100;
 pub const IDM_TOGGLE: usize = 1001;
-pub const IDM_EXIT: usize = 1002;
+pub const IDM_CHECK_UPDATES: usize = 1002;
+pub const IDM_EXIT: usize = 1003;
+pub const IDM_AUTOSTART: usize = 1004;
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -34,21 +36,22 @@ fn create_skia_tray_icon(size: i32) -> HICON {
     // Coordinate scale relative to 32x32 viewBox
     let s = size as f32 / 32.0;
 
-    // 1. Top Edge Guide line
+    // 1. Top Bezel / Screen Edge (M2 5 H30, stroke-width 3)
     let mut line_paint = Paint::default();
     line_paint.set_anti_alias(true);
     line_paint.set_style(PaintStyle::Stroke);
-    line_paint.set_stroke_width(2.0 * s);
+    line_paint.set_stroke_width(3.0 * s);
+    line_paint.set_stroke_cap(skia_safe::PaintCap::Round);
     line_paint.set_color(Color::from_argb(255, 113, 113, 122)); // #71717A
     canvas.draw_line(
-        (4.0 * s, 6.0 * s),
-        (28.0 * s, 6.0 * s),
+        (2.0 * s, 5.0 * s),
+        (30.0 * s, 5.0 * s),
         &line_paint,
     );
 
-    // 2. Light Grey Rounded Notch Capsule
-    let capsule_rect = Rect::from_xywh(8.0 * s, 9.0 * s, 16.0 * s, 8.0 * s);
-    let capsule_rrect = RRect::new_rect_xy(capsule_rect, 4.0 * s, 4.0 * s);
+    // 2. Light Grey Notch Pill (x=3, y=11, w=26, h=15, rx=7.5)
+    let capsule_rect = Rect::from_xywh(3.0 * s, 11.0 * s, 26.0 * s, 15.0 * s);
+    let capsule_rrect = RRect::new_rect_xy(capsule_rect, 7.5 * s, 7.5 * s);
 
     let mut capsule_fill = Paint::default();
     capsule_fill.set_anti_alias(true);
@@ -59,16 +62,16 @@ fn create_skia_tray_icon(size: i32) -> HICON {
     let mut capsule_stroke = Paint::default();
     capsule_stroke.set_anti_alias(true);
     capsule_stroke.set_style(PaintStyle::Stroke);
-    capsule_stroke.set_stroke_width(1.5 * s);
+    capsule_stroke.set_stroke_width(2.5 * s);
     capsule_stroke.set_color(Color::from_argb(255, 113, 113, 122)); // #71717A
     canvas.draw_rrect(capsule_rrect, &capsule_stroke);
 
-    // 3. Active Amber Indicator Dot
+    // 3. Active Amber Status Dot (cx=16, cy=18.5, r=3.0)
     let mut dot_paint = Paint::default();
     dot_paint.set_anti_alias(true);
     dot_paint.set_style(PaintStyle::Fill);
     dot_paint.set_color(Color::from_argb(255, 245, 158, 11)); // #F59E0B
-    canvas.draw_circle((16.0 * s, 13.0 * s), 1.5 * s, &dot_paint);
+    canvas.draw_circle((16.0 * s, 18.5 * s), 3.0 * s, &dot_paint);
 
     // Read out raw BGRA pixels
     let row_bytes = (width * 4) as usize;
@@ -141,8 +144,20 @@ impl TrayIcon {
             GetCursorPos(&mut pt);
 
             let hmenu = CreatePopupMenu();
+            let version_label = format!("OptiNotch v{}", crate::updater::CURRENT_VERSION);
+            let version_text = to_wide(&version_label);
+            let autostart_text = to_wide("Start with Windows");
+            let update_text = to_wide("Check for Updates...");
             let exit_text = to_wide("Exit OptiNotch");
 
+            let is_autostart = crate::autostart::is_autostart_enabled();
+            let autostart_flags = MF_STRING | if is_autostart { MF_CHECKED } else { MF_UNCHECKED };
+
+            // Header (disabled)
+            AppendMenuW(hmenu, MF_GRAYED | MF_DISABLED, 0, version_text.as_ptr());
+            AppendMenuW(hmenu, MF_SEPARATOR, 0, null());
+            AppendMenuW(hmenu, autostart_flags, IDM_AUTOSTART, autostart_text.as_ptr());
+            AppendMenuW(hmenu, MF_STRING, IDM_CHECK_UPDATES, update_text.as_ptr());
             AppendMenuW(hmenu, MF_SEPARATOR, 0, null());
             AppendMenuW(hmenu, MF_STRING, IDM_EXIT, exit_text.as_ptr());
 

@@ -75,12 +75,22 @@ impl GoogleCalendarService {
         let sync_requested = Arc::new(AtomicBool::new(false));
         let auth_in_progress = Arc::new(AtomicBool::new(false));
 
-        // Try to load existing tokens
+        // Try to load existing tokens or ical config
+        let initial_config = load_config(&config_path);
+        let has_ical = initial_config
+            .ical_secret_url
+            .as_ref()
+            .map(|u| !u.trim().is_empty())
+            .unwrap_or(false);
+
         if let Ok(content) = fs::read_to_string(&tokens_path) {
             if let Ok(tokens) = serde_json::from_str::<AuthTokens>(&content) {
                 let mut s = state.lock().unwrap();
-                s.is_authenticated = !tokens.access_token.is_empty();
+                s.is_authenticated = !tokens.access_token.is_empty() || has_ical;
             }
+        } else if has_ical {
+            let mut s = state.lock().unwrap();
+            s.is_authenticated = true;
         }
 
         let service = Self {
@@ -120,7 +130,7 @@ impl GoogleCalendarService {
         });
     }
 
-    /// Start OAuth 2.0 PKCE browser authentication flow
+    /// Start OAuth 2.0 PKCE browser authentication flow or setup wizard
     pub fn start_oauth_flow(&self) {
         if self.auth_in_progress.swap(true, Ordering::SeqCst) {
             return; // Auth already in progress
@@ -135,19 +145,68 @@ impl GoogleCalendarService {
         thread::spawn(move || {
             let config = load_config(&config_path);
             let client_id = if !config.client_id.is_empty() {
-                config.client_id
+                config.client_id.clone()
             } else {
                 DEFAULT_CLIENT_ID.to_string()
             };
 
             let client_secret = if !config.client_secret.is_empty() {
-                config.client_secret
+                config.client_secret.clone()
             } else {
                 DEFAULT_CLIENT_SECRET.to_string()
             };
 
+            // 1. If iCal Secret URL is configured, trigger immediate sync
+            if let Some(ref ical_url) = config.ical_secret_url {
+                if !ical_url.trim().is_empty() {
+                    sync_ical_feed(&state_clone, ical_url);
+                    sync_req.store(true, Ordering::SeqCst);
+                    auth_flag.store(false, Ordering::SeqCst);
+                    return;
+                }
+            }
+
+            // 2. If neither OAuth Client ID nor iCal URL is set, show Setup Guide Dialog
             if client_id.is_empty() {
-                println!("[Google Calendar] Missing client_id. Set in %APPDATA%/OptiNotch/calendar_config.json");
+                // Ensure default template calendar_config.json exists
+                if !config_path.exists() {
+                    let default_template = serde_json::json!({
+                        "ical_secret_url": "",
+                        "client_id": "",
+                        "client_secret": ""
+                    });
+                    let _ = fs::write(&config_path, serde_json::to_string_pretty(&default_template).unwrap_or_default());
+                }
+
+                let prompt_text = "Google Calendar Setup\n\nTo sync your calendar events with OptiNotch:\n\n⚡ Option 1: iCal Secret URL (Instant - Recommended)\n1. Open Google Calendar on the web -> click Settings (gear icon).\n2. Select your calendar under 'Settings for my calendars'.\n3. Scroll to 'Secret address in iCal format' and copy the URL.\n4. Paste the URL into \"ical_secret_url\" in calendar_config.json.\n\n🔑 Option 2: Google Cloud OAuth 2.0 (Custom Client ID)\nEnter your \"client_id\" and \"client_secret\" in calendar_config.json.\n\nWould you like to open calendar_config.json now?\n• Click 'Yes' to open calendar_config.json\n• Click 'No' to open Google Calendar Settings in your browser\n• Click 'Cancel' to close";
+                
+                let title = "OptiNotch - Connect Google Calendar";
+                let text_wide: Vec<u16> = prompt_text.encode_utf16().chain(std::iter::once(0)).collect();
+                let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+
+                unsafe {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{
+                        MessageBoxW, IDNO, IDYES, MB_ICONINFORMATION, MB_YESNOCANCEL,
+                    };
+                    let res = MessageBoxW(
+                        0 as _,
+                        text_wide.as_ptr(),
+                        title_wide.as_ptr(),
+                        MB_YESNOCANCEL | MB_ICONINFORMATION,
+                    );
+
+                    if res == IDYES {
+                        // Open config file and containing folder
+                        let _ = open::that(&config_path);
+                        if let Some(parent) = config_path.parent() {
+                            let _ = open::that(parent);
+                        }
+                    } else if res == IDNO {
+                        // Open Google Calendar settings page
+                        let _ = open::that("https://calendar.google.com/calendar/u/0/r/settings");
+                    }
+                }
+
                 auth_flag.store(false, Ordering::SeqCst);
                 return;
             }
