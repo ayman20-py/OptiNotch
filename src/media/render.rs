@@ -1,7 +1,7 @@
 use super::layout::MediaLayout;
 use crate::window::state::ButtonAnimations;
 use skia_safe::{
-    font::Edging, Canvas, Color, Font, Image, Paint, PaintStyle, PathBuilder, Point, RRect, Rect,
+    Canvas, Color, Font, Image, Paint, PaintStyle, PathBuilder, Point, RRect, Rect, font::Edging,
 };
 
 pub fn draw_no_media_placeholder(
@@ -34,11 +34,8 @@ pub fn draw_no_media_placeholder(
     for (i, &bh) in heights.iter().enumerate() {
         let bx = start_x + (i as f32 * bar_spacing);
         let by = icon_cy - bh / 2.0;
-        let bar_rrect = RRect::new_rect_xy(
-            Rect::from_xywh(bx, by, bar_w, bh),
-            bar_w / 2.0,
-            bar_w / 2.0,
-        );
+        let bar_rrect =
+            RRect::new_rect_xy(Rect::from_xywh(bx, by, bar_w, bh), bar_w / 2.0, bar_w / 2.0);
         canvas.draw_rrect(bar_rrect, &icon_paint);
     }
 
@@ -56,7 +53,12 @@ pub fn draw_no_media_placeholder(
 
     let (_, metrics) = title_font.metrics();
     let title_y = icon_cy - (metrics.ascent + metrics.descent) / 2.0;
-    canvas.draw_str("No Media Playing", (text_x, title_y), &title_font, &title_paint);
+    canvas.draw_str(
+        "No Media Playing...",
+        (text_x, title_y),
+        &title_font,
+        &title_paint,
+    );
 }
 
 pub fn draw_album_art(canvas: &Canvas, image: Option<&Image>, dest_rect: Rect) {
@@ -200,7 +202,11 @@ pub fn draw_progress_bar(
     let mut thumb_paint = Paint::default();
     thumb_paint.set_anti_alias(true);
     thumb_paint.set_color(Color::from_argb(255, 255, 255, 255));
-    canvas.draw_circle((x + fill_w, y + bar_height / 2.0), 4.0 * scale_factor, &thumb_paint);
+    canvas.draw_circle(
+        (x + fill_w, y + bar_height / 2.0),
+        4.0 * scale_factor,
+        &thumb_paint,
+    );
 
     // 4. Timestamps
     let fonts = crate::ui::font_cache::FontCache::get();
@@ -219,7 +225,12 @@ pub fn draw_progress_bar(
     canvas.draw_str(&pos_str, (x, text_y), &time_font, &time_paint);
 
     let (dur_w, _) = time_font.measure_str(&dur_str, Some(&time_paint));
-    canvas.draw_str(&dur_str, (x + width - dur_w, text_y), &time_font, &time_paint);
+    canvas.draw_str(
+        &dur_str,
+        (x + width - dur_w, text_y),
+        &time_font,
+        &time_paint,
+    );
 }
 
 /// Draw Modern Animated Playback Controls with scale bounce & smooth morph
@@ -271,14 +282,7 @@ pub fn draw_playback_controls(
 }
 
 /// Smoothly morphs icon from Play triangle (morph = 0.0) to Pause bars (morph = 1.0)
-fn draw_morphed_play_pause(
-    canvas: &Canvas,
-    cx: f32,
-    cy: f32,
-    morph: f32,
-    s: f32,
-    paint: &Paint,
-) {
+fn draw_morphed_play_pause(canvas: &Canvas, cx: f32, cy: f32, morph: f32, s: f32, paint: &Paint) {
     if morph <= 0.01 {
         // Fast path: Pure Play triangle
         draw_play_icon(canvas, cx, cy, s, paint);
@@ -361,7 +365,12 @@ fn draw_previous_icon(canvas: &Canvas, cx: f32, cy: f32, s: f32, paint: &Paint) 
 
     let bar_w = 2.5 * s;
     let bar_h = size * 2.0;
-    let bar_rect = Rect::from_xywh(cx - size * 0.85 - bar_w - (2.0 * s), cy - bar_h / 2.0, bar_w, bar_h);
+    let bar_rect = Rect::from_xywh(
+        cx - size * 0.85 - bar_w - (2.0 * s),
+        cy - bar_h / 2.0,
+        bar_w,
+        bar_h,
+    );
     let r_bar = RRect::new_rect_xy(bar_rect, bar_w / 2.0, bar_w / 2.0);
     canvas.draw_rrect(r_bar, paint);
 }
