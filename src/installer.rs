@@ -4,7 +4,6 @@ use std::process::Command;
 use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::Registry::*;
-use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const UNINSTALL_SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OptiNotch";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -165,16 +164,7 @@ pub fn install() -> Result<(), String> {
         .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 
-    unsafe {
-        let msg = to_wide("OptiNotch has been successfully installed!\n\n• Location: %LOCALAPPDATA%\\OptiNotch\n• Shortcuts added to Start Menu and Desktop\n• Configured to start with Windows\n\nOptiNotch is now running in your system tray.");
-        let title = to_wide("OptiNotch Setup");
-        MessageBoxW(
-            0 as _,
-            msg.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONINFORMATION,
-        );
-    }
+    crate::ui::dialog::show_installed_success_dialog();
 
     Ok(())
 }
@@ -213,16 +203,7 @@ pub fn uninstall() -> Result<(), String> {
         .args(["/C", runner_path.to_str().unwrap_or("")])
         .spawn();
 
-    unsafe {
-        let msg = to_wide("OptiNotch has been uninstalled successfully from your system.");
-        let title = to_wide("OptiNotch Uninstaller");
-        MessageBoxW(
-            0 as _,
-            msg.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONINFORMATION,
-        );
-    }
+    crate::ui::dialog::show_uninstalled_dialog();
 
     Ok(())
 }
@@ -253,25 +234,15 @@ pub fn handle_startup_and_installer() -> bool {
     }
 
     // Otherwise, launched from Downloads/Desktop/external location:
-    // Prompt the user for 1-Click Install or Portable execution
-    unsafe {
-        let prompt_text = to_wide("Welcome to OptiNotch!\n\nWould you like to install OptiNotch to your system?\n\n• Click 'Yes' to install to %LOCALAPPDATA%\\OptiNotch with Start Menu / Desktop shortcuts & Auto-Start.\n• Click 'No' to run portably without installing.\n• Click 'Cancel' to exit.");
-        let title = to_wide("OptiNotch Setup");
+    // Prompt the user with our modern custom dialog for 1-Click Install or Portable execution
+    let response = crate::ui::dialog::show_setup_dialog();
 
-        let response = MessageBoxW(
-            0 as _,
-            prompt_text.as_ptr(),
-            title.as_ptr(),
-            MB_YESNOCANCEL | MB_ICONQUESTION,
-        );
-
-        match response {
-            IDYES => {
-                let _ = install();
-                false // Installer launched installed instance, exit this wrapper
-            }
-            IDNO => true, // Run portably
-            _ => false,   // Cancel / Exit
+    match response {
+        crate::ui::dialog::DialogResponse::Primary => {
+            let _ = install();
+            false // Installer launched installed instance, exit this wrapper
         }
+        crate::ui::dialog::DialogResponse::Secondary => true, // Run portably
+        crate::ui::dialog::DialogResponse::Cancel => false,   // Exit
     }
 }

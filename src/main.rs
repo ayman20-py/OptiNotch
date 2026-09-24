@@ -9,10 +9,6 @@ mod ui;
 mod updater;
 mod window;
 
-fn to_wide_str(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
 use media::MediaManager;
 use ui::clock::ClockUI;
 use ui::system_status::SystemStatusTracker;
@@ -178,53 +174,20 @@ fn main() {
                     match updater::check_for_updates() {
                         Ok(Some(info)) => {
                             if info.is_newer {
-                                let msg = format!(
-                                    "A new version is available: {}\n\n{}\n\nWould you like to download and apply the update now?",
-                                    info.tag_name,
-                                    info.body
-                                );
-                                let title = "OptiNotch Update Available";
-                                let result = windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                                    0 as _,
-                                    to_wide_str(&msg).as_ptr(),
-                                    to_wide_str(title).as_ptr(),
-                                    windows_sys::Win32::UI::WindowsAndMessaging::MB_YESNO
-                                        | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION,
-                                );
-                                if result == windows_sys::Win32::UI::WindowsAndMessaging::IDYES {
+                                if ui::dialog::show_update_available_dialog(&info.tag_name, &info.body) {
                                     if let Err(e) = updater::apply_update(&info.download_url) {
-                                        eprintln!("[Update error] {}", e);
+                                        ui::dialog::show_alert_dialog("Update Error", &format!("Failed to apply update: {}", e));
                                     }
                                 }
                             } else {
-                                let msg = format!("You are up to date! (OptiNotch v{})", updater::CURRENT_VERSION);
-                                windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                                    0 as _,
-                                    to_wide_str(&msg).as_ptr(),
-                                    to_wide_str("OptiNotch").as_ptr(),
-                                    windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
-                                        | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION,
-                                );
+                                ui::dialog::show_up_to_date_dialog(updater::CURRENT_VERSION);
                             }
                         }
                         Ok(None) => {
-                            windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                                0 as _,
-                                to_wide_str("Could not find any releases on GitHub.").as_ptr(),
-                                to_wide_str("OptiNotch Update").as_ptr(),
-                                windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
-                                    | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING,
-                            );
+                            ui::dialog::show_alert_dialog("OptiNotch Update", "No releases found on GitHub.");
                         }
                         Err(e) => {
-                            let err_msg = format!("Failed to check for updates:\n{}", e);
-                            windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                                0 as _,
-                                to_wide_str(&err_msg).as_ptr(),
-                                to_wide_str("OptiNotch Update Error").as_ptr(),
-                                windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
-                                    | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR,
-                            );
+                            ui::dialog::show_alert_dialog("Update Error", &format!("Failed to check for updates:\n{}", e));
                         }
                     }
                 });
