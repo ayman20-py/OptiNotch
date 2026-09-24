@@ -1,2 +1,7 @@
 /target
 .env
+.env.*
+*.env
+tokens.json
+calendar_config.json
+update_runner.bat

@@ -85,27 +85,14 @@
 
 ## 📆 Google Calendar Integration
 
-OptiNotch offers two effortless methods to connect your Google Calendar:
+OptiNotch connects directly to your Google Calendar using **official Google OAuth 2.0**:
 
-### ⚡ Method 1: iCal Secret URL (10-Second Setup — Recommended)
-1. Open [Google Calendar Web Settings](https://calendar.google.com/calendar/u/0/r/settings) in your browser.
-2. Select your calendar on the left under **"Settings for my calendars"**.
-3. Scroll down to **"Secret address in iCal format"** and copy the URL.
-4. In OptiNotch, click **"+ Connect Account"** $\rightarrow$ Click **"Yes"** to open `calendar_config.json`.
-5. Paste your URL into `"ical_secret_url"`:
-   ```json
-   {
-     "ical_secret_url": "https://calendar.google.com/calendar/ical/your_email/secret-xxxx/basic.ics",
-     "client_id": "",
-     "client_secret": ""
-   }
-   ```
-6. Save the file. OptiNotch will immediately pull and render your schedule!
+1. Click **"+ Connect Account"** in the expanded calendar widget.
+2. Your default web browser will open immediately to the official Google sign-in and authorization screen.
+3. Select your Google account and click **"Allow"** to grant read-only calendar access.
+4. The browser confirms connection (`✓ OptiNotch Connected!`), and OptiNotch instantly syncs and displays your live schedule!
 
-### 🔑 Method 2: Google Cloud OAuth 2.0
-1. Create Desktop OAuth credentials in the [Google Cloud Console](https://console.cloud.google.com/).
-2. Add `"client_id"` and `"client_secret"` into `%APPDATA%\OptiNotch\calendar_config.json`.
-3. Click **"+ Connect Account"** in OptiNotch to authorize in your default browser.
+*(Tokens are refreshed automatically in the background—no repeated logins required).*
 
 ---
 

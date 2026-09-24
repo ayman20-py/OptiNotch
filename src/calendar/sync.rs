@@ -22,9 +22,16 @@ fn get_http_client() -> &'static reqwest::blocking::Client {
     })
 }
 
-// Default Desktop OAuth client credentials for OptiNotch
-const DEFAULT_CLIENT_ID: &str = "";
-const DEFAULT_CLIENT_SECRET: &str = "";
+// Default Desktop OAuth credentials (injected from .env during compilation or loaded at runtime)
+const DEFAULT_CLIENT_ID: &str = match option_env!("CALENDAR_CLIENT_ID") {
+    Some(val) => val,
+    None => "",
+};
+const DEFAULT_CLIENT_SECRET: &str = match option_env!("CALENDAR_CLIENT_SECRET") {
+    Some(val) => val,
+    None => "",
+};
+
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR_API: &str = "https://www.googleapis.com/calendar/v3";
@@ -42,7 +49,6 @@ pub struct AuthTokens {
 pub struct GoogleCalendarConfig {
     pub client_id: String,
     pub client_secret: String,
-    pub ical_secret_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -75,22 +81,12 @@ impl GoogleCalendarService {
         let sync_requested = Arc::new(AtomicBool::new(false));
         let auth_in_progress = Arc::new(AtomicBool::new(false));
 
-        // Try to load existing tokens or ical config
-        let initial_config = load_config(&config_path);
-        let has_ical = initial_config
-            .ical_secret_url
-            .as_ref()
-            .map(|u| !u.trim().is_empty())
-            .unwrap_or(false);
-
+        // Try to load existing tokens on startup
         if let Ok(content) = fs::read_to_string(&tokens_path) {
             if let Ok(tokens) = serde_json::from_str::<AuthTokens>(&content) {
                 let mut s = state.lock().unwrap();
-                s.is_authenticated = !tokens.access_token.is_empty() || has_ical;
+                s.is_authenticated = !tokens.access_token.is_empty();
             }
-        } else if has_ical {
-            let mut s = state.lock().unwrap();
-            s.is_authenticated = true;
         }
 
         let service = Self {
@@ -101,7 +97,7 @@ impl GoogleCalendarService {
             auth_in_progress: Arc::clone(&auth_in_progress),
         };
 
-        // Start background worker thread for Delta Sync + Background Polling
+        // Start background worker thread for Delta Sync + Polling
         let state_clone = Arc::clone(&state);
         let tokens_path_clone = service.tokens_path.clone();
         let config_path_clone = service.config_path.clone();
@@ -130,7 +126,7 @@ impl GoogleCalendarService {
         });
     }
 
-    /// Start OAuth 2.0 PKCE browser authentication flow or setup wizard
+    /// Start direct Google OAuth 2.0 PKCE / loopback browser authentication
     pub fn start_oauth_flow(&self) {
         if self.auth_in_progress.swap(true, Ordering::SeqCst) {
             return; // Auth already in progress
@@ -156,62 +152,7 @@ impl GoogleCalendarService {
                 DEFAULT_CLIENT_SECRET.to_string()
             };
 
-            // 1. If iCal Secret URL is configured, trigger immediate sync
-            if let Some(ref ical_url) = config.ical_secret_url {
-                if !ical_url.trim().is_empty() {
-                    sync_ical_feed(&state_clone, ical_url);
-                    sync_req.store(true, Ordering::SeqCst);
-                    auth_flag.store(false, Ordering::SeqCst);
-                    return;
-                }
-            }
-
-            // 2. If neither OAuth Client ID nor iCal URL is set, show Setup Guide Dialog
-            if client_id.is_empty() {
-                // Ensure default template calendar_config.json exists
-                if !config_path.exists() {
-                    let default_template = serde_json::json!({
-                        "ical_secret_url": "",
-                        "client_id": "",
-                        "client_secret": ""
-                    });
-                    let _ = fs::write(&config_path, serde_json::to_string_pretty(&default_template).unwrap_or_default());
-                }
-
-                let prompt_text = "Google Calendar Setup\n\nTo sync your calendar events with OptiNotch:\n\n⚡ Option 1: iCal Secret URL (Instant - Recommended)\n1. Open Google Calendar on the web -> click Settings (gear icon).\n2. Select your calendar under 'Settings for my calendars'.\n3. Scroll to 'Secret address in iCal format' and copy the URL.\n4. Paste the URL into \"ical_secret_url\" in calendar_config.json.\n\n🔑 Option 2: Google Cloud OAuth 2.0 (Custom Client ID)\nEnter your \"client_id\" and \"client_secret\" in calendar_config.json.\n\nWould you like to open calendar_config.json now?\n• Click 'Yes' to open calendar_config.json\n• Click 'No' to open Google Calendar Settings in your browser\n• Click 'Cancel' to close";
-                
-                let title = "OptiNotch - Connect Google Calendar";
-                let text_wide: Vec<u16> = prompt_text.encode_utf16().chain(std::iter::once(0)).collect();
-                let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
-
-                unsafe {
-                    use windows_sys::Win32::UI::WindowsAndMessaging::{
-                        MessageBoxW, IDNO, IDYES, MB_ICONINFORMATION, MB_YESNOCANCEL,
-                    };
-                    let res = MessageBoxW(
-                        0 as _,
-                        text_wide.as_ptr(),
-                        title_wide.as_ptr(),
-                        MB_YESNOCANCEL | MB_ICONINFORMATION,
-                    );
-
-                    if res == IDYES {
-                        // Open config file and containing folder
-                        let _ = open::that(&config_path);
-                        if let Some(parent) = config_path.parent() {
-                            let _ = open::that(parent);
-                        }
-                    } else if res == IDNO {
-                        // Open Google Calendar settings page
-                        let _ = open::that("https://calendar.google.com/calendar/u/0/r/settings");
-                    }
-                }
-
-                auth_flag.store(false, Ordering::SeqCst);
-                return;
-            }
-
-            let redirect_uri = format!("http://localhost:{}/callback", REDIRECT_PORT);
+            let redirect_uri = format!("http://127.0.0.1:{}/callback", REDIRECT_PORT);
             let auth_url = format!(
                 "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
                 GOOGLE_AUTH_URL,
@@ -220,22 +161,21 @@ impl GoogleCalendarService {
                 urlencoding::encode(SCOPE)
             );
 
-            // Open default browser
+            // 1. Open default browser directly to Google Sign-In
             let _ = open::that(&auth_url);
 
-            // Start local loopback listener to capture auth code
+            // 2. Start local loopback listener to capture auth code
             if let Ok(server) = tiny_http::Server::http(format!("127.0.0.1:{}", REDIRECT_PORT)) {
                 for request in server.incoming_requests() {
                     let url = request.url().to_string();
                     if url.starts_with("/callback") {
                         if let Some(code) = extract_query_param(&url, "code") {
-                            let response = tiny_http::Response::from_string(
-                                "<html><body style='font-family:Segoe UI,sans-serif;background:#121212;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;'><h1 style='color:#38bdf8'>✓ OptiNotch Connected!</h1><p style='color:#a1a1aa'>You can close this tab and return to OptiNotch.</p></body></html>",
-                            )
-                            .with_header(
-                                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..])
-                                    .unwrap(),
-                            );
+                            let html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>OptiNotch Connected</title><style>body{background:#09090b;color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}.card{background:#18181b;padding:36px 48px;border-radius:18px;border:1px solid #27272a;text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.5);}h1{color:#38bdf8;margin:0 0 12px;font-size:24px;}p{color:#a1a1aa;margin:0;font-size:14px;}</style></head><body><div class='card'><h1>&#10003; OptiNotch Connected!</h1><p>Your Google Calendar has been linked. You can close this tab and return to OptiNotch.</p></div></body></html>";
+                            let response = tiny_http::Response::from_string(html)
+                                .with_header(
+                                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
+                                        .unwrap(),
+                                );
                             let _ = request.respond(response);
 
                             // Exchange code for tokens
@@ -254,6 +194,7 @@ impl GoogleCalendarService {
                                     s.is_authenticated = true;
                                 }
                                 sync_req.store(true, Ordering::SeqCst);
+                                perform_sync(&state_clone, &tokens_path, &config_path);
                             }
                             break;
                         }
@@ -298,7 +239,6 @@ fn perform_sync(state: &Arc<Mutex<GoogleSyncState>>, tokens_path: &PathBuf, conf
     let config = load_config(config_path);
     let mut tokens = load_tokens(tokens_path);
 
-    // 1. Try Google Calendar OAuth API
     if let Some(ref mut t) = tokens {
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -336,14 +276,6 @@ fn perform_sync(state: &Arc<Mutex<GoogleSyncState>>, tokens_path: &PathBuf, conf
                     sync_google_rest_api(state, &t.access_token);
                 }
             }
-        }
-        return;
-    }
-
-    // 2. Fallback to iCal Secret URL if configured
-    if let Some(ref ical_url) = config.ical_secret_url {
-        if !ical_url.is_empty() {
-            sync_ical_feed(state, ical_url);
         }
     }
 }
@@ -415,6 +347,19 @@ fn sync_google_rest_api(state: &Arc<Mutex<GoogleSyncState>>, access_token: &str)
                         }
                     }
 
+                    // Sort events on each day chronologically
+                    for day_events in new_events.values_mut() {
+                        day_events.sort_by(|a, b| {
+                            if a.is_all_day && !b.is_all_day {
+                                std::cmp::Ordering::Less
+                            } else if !a.is_all_day && b.is_all_day {
+                                std::cmp::Ordering::Greater
+                            } else {
+                                a.time_str.cmp(&b.time_str)
+                            }
+                        });
+                    }
+
                     let mut s = state.lock().unwrap();
                     s.events = new_events;
                     s.is_authenticated = true;
@@ -425,8 +370,11 @@ fn sync_google_rest_api(state: &Arc<Mutex<GoogleSyncState>>, access_token: &str)
         }
     }
 
-    let mut s = state.lock().unwrap();
-    s.is_syncing = false;
+    {
+        let mut s = state.lock().unwrap();
+        s.is_syncing = false;
+    }
+
     success
 }
 
@@ -439,42 +387,40 @@ fn fetch_calendar_default_color(client: &reqwest::blocking::Client, access_token
         .ok()?;
 
     if res.status().is_success() {
-        let json: serde_json::Value = res.json().ok()?;
-        if let Some(bg) = json.get("backgroundColor").and_then(|b| b.as_str()) {
-            return parse_hex_color(bg);
-        }
-        if let Some(cid) = json.get("colorId").and_then(|c| c.as_str()) {
-            return Some(parse_event_color_id(cid));
+        let json = res.json::<serde_json::Value>().ok()?;
+        if let Some(bg_hex) = json.get("backgroundColor").and_then(|c| c.as_str()) {
+            return parse_hex_color(bg_hex);
         }
     }
     None
 }
 
 fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
-    let clean = hex.trim().trim_start_matches('#');
+    let clean = hex.trim_start_matches('#');
     if clean.len() == 6 {
         let r = u8::from_str_radix(&clean[0..2], 16).ok()?;
         let g = u8::from_str_radix(&clean[2..4], 16).ok()?;
         let b = u8::from_str_radix(&clean[4..6], 16).ok()?;
-        return Some((r, g, b));
+        Some((r, g, b))
+    } else {
+        None
     }
-    None
 }
 
 fn parse_event_color_id(color_id: &str) -> (u8, u8, u8) {
     match color_id {
-        "1" => (121, 134, 203), // Lavender (#7986CB)
-        "2" => (51, 182, 121),  // Sage (#33B679)
-        "3" => (142, 36, 170),  // Grape (#8E24AA)
-        "4" => (230, 124, 115), // Flamingo (#E67C73)
-        "5" => (246, 191, 38),  // Banana (#F6BF26)
-        "6" => (244, 81, 30),   // Tangerine (#F4511E)
-        "7" => (3, 155, 229),   // Peacock (#039BE5)
-        "8" => (97, 97, 97),    // Graphite (#616161)
-        "9" => (63, 81, 181),   // Blueberry (#3F51B5)
-        "10" => (11, 128, 67),  // Basil (#0B8043)
-        "11" => (213, 0, 0),    // Tomato (#D50000)
-        _ => (59, 130, 246),    // Default Google Blue (#3B82F6)
+        "1" => (121, 134, 203),  // Lavender
+        "2" => (51, 182, 121),   // Sage
+        "3" => (142, 36, 170),   // Grape
+        "4" => (230, 124, 115),  // Flamingo
+        "5" => (246, 191, 38),   // Banana
+        "6" => (244, 81, 30),    // Tangerine
+        "7" => (3, 155, 229),    // Peacock
+        "8" => (63, 81, 181),    // Graphite
+        "9" => (57, 73, 171),    // Blueberry
+        "10" => (11, 128, 67),   // Basil
+        "11" => (213, 0, 0),     // Tomato
+        _ => (59, 130, 246),     // Default Google Blue
     }
 }
 
@@ -483,8 +429,10 @@ fn parse_event_time(
     end: Option<&serde_json::Value>,
 ) -> Option<(u32, u32, u32, String, bool)> {
     let start_obj = start?;
+    let end_obj = end;
+
+    // 1. Check all-day date: "2026-09-24"
     if let Some(date_str) = start_obj.get("date").and_then(|d| d.as_str()) {
-        // All-day event: format YYYY-MM-DD
         let parts: Vec<&str> = date_str.split('-').collect();
         if parts.len() == 3 {
             let y: u32 = parts[0].parse().ok()?;
@@ -492,48 +440,44 @@ fn parse_event_time(
             let d: u32 = parts[2].parse().ok()?;
             return Some((y, m, d, "All-day".to_string(), true));
         }
-    } else if let Some(dt_str) = start_obj.get("dateTime").and_then(|d| d.as_str()) {
-        // Timed event: format YYYY-MM-DDTHH:MM:SS+...
-        let parts: Vec<&str> = dt_str.split('T').collect();
-        if parts.len() >= 2 {
-            let date_parts: Vec<&str> = parts[0].split('-').collect();
-            if date_parts.len() == 3 {
-                let y: u32 = date_parts[0].parse().ok()?;
-                let m: u32 = date_parts[1].parse().ok()?;
-                let d: u32 = date_parts[2].parse().ok()?;
+    }
 
-                let start_hm = format_hhmm(parts[1]);
-                let end_hm = end
-                    .and_then(|e| e.get("dateTime"))
-                    .and_then(|dt| dt.as_str())
-                    .and_then(|s| s.split('T').nth(1))
-                    .map(format_hhmm)
-                    .unwrap_or_default();
+    // 2. Check timed dateTime: "2026-09-24T14:30:00+08:00"
+    if let Some(dt_str) = start_obj.get("dateTime").and_then(|d| d.as_str()) {
+        if dt_str.len() >= 16 {
+            let date_part = &dt_str[0..10];
+            let parts: Vec<&str> = date_part.split('-').collect();
+            if parts.len() == 3 {
+                let y: u32 = parts[0].parse().ok()?;
+                let m: u32 = parts[1].parse().ok()?;
+                let d: u32 = parts[2].parse().ok()?;
 
-                let time_str = if !end_hm.is_empty() {
-                    format!("{} - {}", start_hm, end_hm)
-                } else {
-                    start_hm
-                };
+                let time_part = &dt_str[11..16]; // "14:30"
+                let sh: u32 = time_part[0..2].parse().unwrap_or(0);
+                let sm: u32 = time_part[3..5].parse().unwrap_or(0);
+                let ampm = if sh >= 12 { "PM" } else { "AM" };
+                let h12 = if sh == 0 { 12 } else if sh > 12 { sh - 12 } else { sh };
+                let start_formatted = format!("{:02}:{:02} {}", h12, sm, ampm);
+
+                let mut time_str = start_formatted;
+
+                if let Some(end_dt_str) = end_obj.and_then(|e| e.get("dateTime")).and_then(|d| d.as_str()) {
+                    if end_dt_str.len() >= 16 {
+                        let end_time_part = &end_dt_str[11..16];
+                        let eh: u32 = end_time_part[0..2].parse().unwrap_or(0);
+                        let em: u32 = end_time_part[3..5].parse().unwrap_or(0);
+                        let e_ampm = if eh >= 12 { "PM" } else { "AM" };
+                        let eh12 = if eh == 0 { 12 } else if eh > 12 { eh - 12 } else { eh };
+                        time_str = format!("{} - {:02}:{:02} {}", time_str, eh12, em, e_ampm);
+                    }
+                }
 
                 return Some((y, m, d, time_str, false));
             }
         }
     }
-    None
-}
 
-fn format_hhmm(time_part: &str) -> String {
-    let clean = time_part.chars().take(5).collect::<String>();
-    let parts: Vec<&str> = clean.split(':').collect();
-    if parts.len() == 2 {
-        if let (Ok(h), Ok(m)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-            let ampm = if h >= 12 { "PM" } else { "AM" };
-            let h12 = if h == 0 { 12 } else if h > 12 { h - 12 } else { h };
-            return format!("{:02}:{:02} {}", h12, m, ampm);
-        }
-    }
-    clean
+    None
 }
 
 fn exchange_code_for_tokens(
@@ -544,11 +488,11 @@ fn exchange_code_for_tokens(
 ) -> Result<AuthTokens, Box<dyn std::error::Error>> {
     let client = get_http_client();
     let params = [
-        ("code", code),
         ("client_id", client_id),
         ("client_secret", client_secret),
-        ("redirect_uri", redirect_uri),
+        ("code", code),
         ("grant_type", "authorization_code"),
+        ("redirect_uri", redirect_uri),
     ];
 
     let res = client.post(GOOGLE_TOKEN_URL).form(&params).send()?;
@@ -620,103 +564,6 @@ fn refresh_access_token(
     })
 }
 
-fn sync_ical_feed(state: &Arc<Mutex<GoogleSyncState>>, ical_url: &str) {
-    let client = get_http_client();
-
-    if let Ok(res) = client.get(ical_url).send() {
-        if res.status().is_success() {
-            if let Ok(text) = res.text() {
-                let parsed = parse_ical_text(&text);
-                let mut s = state.lock().unwrap();
-                s.events = parsed;
-                s.is_authenticated = true;
-                s.last_sync_time = Some(Instant::now());
-            }
-        }
-    }
-}
-
-fn parse_ical_text(text: &str) -> HashMap<(u32, u32, u32), Vec<CalendarEvent>> {
-    let mut events_map: HashMap<(u32, u32, u32), Vec<CalendarEvent>> = HashMap::new();
-    let mut in_vevent = false;
-    let mut current_summary = String::new();
-    let mut current_dtstart = String::new();
-    let mut current_dtend = String::new();
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed == "BEGIN:VEVENT" {
-            in_vevent = true;
-            current_summary.clear();
-            current_dtstart.clear();
-            current_dtend.clear();
-        } else if trimmed == "END:VEVENT" {
-            if in_vevent && !current_summary.is_empty() && !current_dtstart.is_empty() {
-                if let Some((y, m, d, time_str, is_all_day)) = parse_ical_dates(&current_dtstart, &current_dtend) {
-                    let event = CalendarEvent {
-                        title: current_summary.clone(),
-                        time_str,
-                        color_rgb: (59, 130, 246), // Google Blue
-                        is_all_day,
-                    };
-                    events_map.entry((y, m, d)).or_default().push(event);
-                }
-            }
-            in_vevent = false;
-        } else if in_vevent {
-            if let Some(s) = trimmed.strip_prefix("SUMMARY:") {
-                current_summary = s.to_string();
-            } else if trimmed.starts_with("DTSTART") {
-                if let Some(idx) = trimmed.find(':') {
-                    current_dtstart = trimmed[idx + 1..].to_string();
-                }
-            } else if trimmed.starts_with("DTEND") {
-                if let Some(idx) = trimmed.find(':') {
-                    current_dtend = trimmed[idx + 1..].to_string();
-                }
-            }
-        }
-    }
-
-    events_map
-}
-
-fn parse_ical_dates(start_str: &str, end_str: &str) -> Option<(u32, u32, u32, String, bool)> {
-    // Format: YYYYMMDD or YYYYMMDDTHHMMSSZ
-    let clean_start = start_str.trim();
-    if clean_start.len() >= 8 {
-        let y: u32 = clean_start[0..4].parse().ok()?;
-        let m: u32 = clean_start[4..6].parse().ok()?;
-        let d: u32 = clean_start[6..8].parse().ok()?;
-
-        if clean_start.contains('T') && clean_start.len() >= 13 {
-            // Timed event
-            let sh: u32 = clean_start[9..11].parse().unwrap_or(0);
-            let sm: u32 = clean_start[11..13].parse().unwrap_or(0);
-            let ampm = if sh >= 12 { "PM" } else { "AM" };
-            let h12 = if sh == 0 { 12 } else if sh > 12 { sh - 12 } else { sh };
-            let start_formatted = format!("{:02}:{:02} {}", h12, sm, ampm);
-
-            let clean_end = end_str.trim();
-            let end_formatted = if clean_end.contains('T') && clean_end.len() >= 13 {
-                let eh: u32 = clean_end[9..11].parse().unwrap_or(0);
-                let em: u32 = clean_end[11..13].parse().unwrap_or(0);
-                let e_ampm = if eh >= 12 { "PM" } else { "AM" };
-                let eh12 = if eh == 0 { 12 } else if eh > 12 { eh - 12 } else { eh };
-                format!(" - {:02}:{:02} {}", eh12, em, e_ampm)
-            } else {
-                String::new()
-            };
-
-            let time_str = format!("{}{}", start_formatted, end_formatted);
-            return Some((y, m, d, time_str, false));
-        } else {
-            return Some((y, m, d, "All-day".to_string(), true));
-        }
-    }
-    None
-}
-
 fn extract_query_param(url: &str, param: &str) -> Option<String> {
     let query = url.split('?').nth(1)?;
     for pair in query.split('&') {
@@ -734,7 +581,7 @@ fn load_config(path: &PathBuf) -> GoogleCalendarConfig {
     let mut client_id = std::env::var("CALENDAR_CLIENT_ID").unwrap_or_default();
     let mut client_secret = std::env::var("CALENDAR_CLIENT_SECRET").unwrap_or_default();
 
-    // Check .env file in working dir, appdata dir, or current dir
+    // Check .env files in working dir, appdata dir, or current dir
     for env_path in [
         PathBuf::from(".env"),
         get_app_data_dir().join(".env"),

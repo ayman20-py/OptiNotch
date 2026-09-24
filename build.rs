@@ -1,4 +1,23 @@
 fn main() {
+    println!("cargo:rerun-if-changed=.env");
+
+    // Read .env at build-time if present and inject into environment
+    if let Ok(content) = std::fs::read_to_string(".env") {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if let Some((k, v)) = trimmed.split_once('=') {
+                let key = k.trim();
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if key == "CALENDAR_CLIENT_ID" || key == "CALENDAR_CLIENT_SECRET" {
+                    println!("cargo:rustc-env={}={}", key, val);
+                }
+            }
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
         let mut res = winresource::WindowsResource::new();
