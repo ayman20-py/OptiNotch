@@ -1,9 +1,10 @@
-use crate::media::{
+use crate::ui::calendar;
+use crate::ui::clock::ClockUI;
+use crate::ui::header::draw_header_system_bar;
+use crate::ui::media::{
     draw_album_art, draw_media_info, draw_no_media_placeholder, draw_playback_controls,
     draw_progress_bar, MediaInfo, MediaLayout,
 };
-use crate::ui::clock::ClockUI;
-use crate::ui::header::draw_header_system_bar;
 use crate::ui::system_status::{BatteryStatus, VolumeStatus};
 use crate::window::NotchController;
 use skia_safe::{Canvas, Color, Image, Paint, PaintStyle, RRect, Rect};
@@ -134,7 +135,7 @@ pub fn draw_notch(
         }
 
         // Calendar Widget (Right 55% Zone)
-        let cal_layout = crate::calendar::CalendarLayout::compute(
+        let cal_layout = calendar::CalendarLayout::compute(
             pill_x,
             pill_y,
             current_w,
@@ -142,7 +143,7 @@ pub fn draw_notch(
             scale,
             &controller.calendar,
         );
-        crate::calendar::draw_calendar(canvas, &controller.calendar, &cal_layout, scale);
+        calendar::draw_calendar(canvas, &controller.calendar, &cal_layout, scale);
     }
 
     canvas.restore(); // restore layer

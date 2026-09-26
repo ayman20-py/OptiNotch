@@ -1,16 +1,15 @@
 #![windows_subsystem = "windows"]
 
 mod autostart;
-mod calendar;
 mod installer;
-mod media;
 mod render;
 mod ui;
 mod updater;
 mod window;
 
-use media::MediaManager;
+use ui::calendar::GoogleCalendarService;
 use ui::clock::ClockUI;
+use ui::media::MediaManager;
 use ui::system_status::SystemStatusTracker;
 use window::{NotchConfig, NotchController, NotchState, NotchWindow, TrayIcon};
 use windows_sys::Win32::Graphics::Dwm::DwmFlush;
@@ -47,7 +46,7 @@ fn main() {
     let mut notch = NotchWindow::new(&mut controller);
     let mut clock_ui = ClockUI::new(scale_factor);
     let mut media_manager = MediaManager::new();
-    let calendar_service = calendar::GoogleCalendarService::new();
+    let calendar_service = GoogleCalendarService::new();
     let system_status = SystemStatusTracker::new();
 
     // 3. Register System Tray Icon
@@ -170,25 +169,33 @@ fn main() {
 
             // Check for updates command from tray menu
             if notch.check_check_updates() {
-                std::thread::spawn(|| {
-                    match updater::check_for_updates() {
-                        Ok(Some(info)) => {
-                            if info.is_newer {
-                                if ui::dialog::show_update_available_dialog(&info.tag_name, &info.body) {
-                                    if let Err(e) = updater::apply_update(&info.download_url) {
-                                        ui::dialog::show_alert_dialog("Update Error", &format!("Failed to apply update: {}", e));
-                                    }
+                std::thread::spawn(|| match updater::check_for_updates() {
+                    Ok(Some(info)) => {
+                        if info.is_newer {
+                            if ui::dialog::show_update_available_dialog(&info.tag_name, &info.body)
+                            {
+                                if let Err(e) = updater::apply_update(&info.download_url) {
+                                    ui::dialog::show_alert_dialog(
+                                        "Update Error",
+                                        &format!("Failed to apply update: {}", e),
+                                    );
                                 }
-                            } else {
-                                ui::dialog::show_up_to_date_dialog(updater::CURRENT_VERSION);
                             }
+                        } else {
+                            ui::dialog::show_up_to_date_dialog(updater::CURRENT_VERSION);
                         }
-                        Ok(None) => {
-                            ui::dialog::show_alert_dialog("OptiNotch Update", "No releases found on GitHub.");
-                        }
-                        Err(e) => {
-                            ui::dialog::show_alert_dialog("Update Error", &format!("Failed to check for updates:\n{}", e));
-                        }
+                    }
+                    Ok(None) => {
+                        ui::dialog::show_alert_dialog(
+                            "OptiNotch Update",
+                            "No releases found on GitHub.",
+                        );
+                    }
+                    Err(e) => {
+                        ui::dialog::show_alert_dialog(
+                            "Update Error",
+                            &format!("Failed to check for updates:\n{}", e),
+                        );
                     }
                 });
             }

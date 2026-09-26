@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::calendar::model::CalendarEvent;
+use super::model::CalendarEvent;
 
 static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 

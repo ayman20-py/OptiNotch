@@ -159,7 +159,7 @@ pub struct NotchController {
     pub scale_spring: Spring,   // 0.85 = micro-scale when hidden, 1.0 = normal
     pub is_hidden: bool,
     pub btn_anims: ButtonAnimations,
-    pub calendar: crate::calendar::CalendarState,
+    pub calendar: crate::ui::calendar::CalendarState,
     pub current_monitor: usize,
     pub total_monitors: usize,
     pub is_animating: bool,
@@ -185,7 +185,7 @@ impl NotchController {
             scale_spring,
             is_hidden: false,
             btn_anims: ButtonAnimations::new(),
-            calendar: crate::calendar::CalendarState::new(),
+            calendar: crate::ui::calendar::CalendarState::new(),
             current_monitor: 0,
             total_monitors: 1,
             is_animating: false,
@@ -356,14 +356,15 @@ impl NotchController {
         }
 
         // 2. Check Media Controls
-        let media_layout = crate::media::MediaLayout::compute(pill_x, pill_y, current_w, current_h, scale);
+        let media_layout =
+            crate::ui::media::MediaLayout::compute(pill_x, pill_y, current_w, current_h, scale);
         let media_act = media_layout.hit_test(local_x, local_y);
         if media_act != MediaAction::None {
             return media_act;
         }
 
         // 3. Check Calendar Controls
-        let cal_layout = crate::calendar::CalendarLayout::compute(
+        let cal_layout = crate::ui::calendar::CalendarLayout::compute(
             pill_x,
             pill_y,
             current_w,
@@ -372,18 +373,22 @@ impl NotchController {
             &self.calendar,
         );
         match cal_layout.hit_test(local_x, local_y, self.calendar.view_mode) {
-            crate::calendar::CalendarAction::SelectDay(idx) => MediaAction::CalendarSelectDay(idx),
-            crate::calendar::CalendarAction::PrevWeek => MediaAction::CalendarPrevWeek,
-            crate::calendar::CalendarAction::NextWeek => MediaAction::CalendarNextWeek,
-            crate::calendar::CalendarAction::OpenMonthPicker => MediaAction::CalendarOpenMonthPicker,
-            crate::calendar::CalendarAction::CloseMonthPicker => MediaAction::CalendarCloseMonthPicker,
-            crate::calendar::CalendarAction::PrevMonth => MediaAction::CalendarPrevMonth,
-            crate::calendar::CalendarAction::NextMonth => MediaAction::CalendarNextMonth,
-            crate::calendar::CalendarAction::SelectPickerDate { year, month, day } => {
+            crate::ui::calendar::CalendarAction::SelectDay(idx) => MediaAction::CalendarSelectDay(idx),
+            crate::ui::calendar::CalendarAction::PrevWeek => MediaAction::CalendarPrevWeek,
+            crate::ui::calendar::CalendarAction::NextWeek => MediaAction::CalendarNextWeek,
+            crate::ui::calendar::CalendarAction::OpenMonthPicker => {
+                MediaAction::CalendarOpenMonthPicker
+            }
+            crate::ui::calendar::CalendarAction::CloseMonthPicker => {
+                MediaAction::CalendarCloseMonthPicker
+            }
+            crate::ui::calendar::CalendarAction::PrevMonth => MediaAction::CalendarPrevMonth,
+            crate::ui::calendar::CalendarAction::NextMonth => MediaAction::CalendarNextMonth,
+            crate::ui::calendar::CalendarAction::SelectPickerDate { year, month, day } => {
                 MediaAction::CalendarSelectPickerDate { year, month, day }
             }
-            crate::calendar::CalendarAction::ConnectGoogle => MediaAction::CalendarConnectGoogle,
-            crate::calendar::CalendarAction::None => MediaAction::None,
+            crate::ui::calendar::CalendarAction::ConnectGoogle => MediaAction::CalendarConnectGoogle,
+            crate::ui::calendar::CalendarAction::None => MediaAction::None,
         }
     }
 }

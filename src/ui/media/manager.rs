@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
 
-use crate::media::control::MediaInfo;
+use super::control::MediaInfo;
 use std::time::Instant;
 
 struct InternalMediaState {

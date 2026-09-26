@@ -125,9 +125,14 @@ OptiNotch/
 ├── assets/             # Vector SVGs and multi-resolution Windows icons (.ico)
 ├── scripts/            # Build, icon generation, and packaging scripts
 ├── src/
-│   ├── calendar/       # Calendar state, layout engine, Google & iCal sync, and rendering
-│   ├── media/          # Windows SMTC media integration & playback control layout
-│   ├── ui/             # Dynamic clock, system volume, and battery monitors
+│   ├── ui/             # UI components, rendering & integrations
+│   │   ├── calendar/   # Calendar state, layout engine, Google & iCal sync, and rendering
+│   │   ├── clock/      # Dynamic island clock and date display
+│   │   ├── dialog/     # Native modern Windows UI dialogs & popups
+│   │   ├── font_cache/ # Fast cached text & typography engine
+│   │   ├── header/     # Top header bar, quick icons, and multi-monitor toggle
+│   │   ├── media/      # Windows SMTC media integration & playback control layout
+│   │   └── system_status/ # System battery, charging, and audio volume monitors
 │   ├── updater/        # GitHub Releases version checking and self-updating engine
 │   ├── window/         # Win32 layered window, tray icon, input hooks, and spring controller
 │   ├── autostart.rs    # Windows Run registry management
