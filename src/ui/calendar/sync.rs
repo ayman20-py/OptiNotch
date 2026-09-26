@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -171,11 +169,13 @@ impl GoogleCalendarService {
                     if url.starts_with("/callback") {
                         if let Some(code) = extract_query_param(&url, "code") {
                             let html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>OptiNotch Connected</title><style>body{background:#09090b;color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}.card{background:#18181b;padding:36px 48px;border-radius:18px;border:1px solid #27272a;text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.5);}h1{color:#38bdf8;margin:0 0 12px;font-size:24px;}p{color:#a1a1aa;margin:0;font-size:14px;}</style></head><body><div class='card'><h1>&#10003; OptiNotch Connected!</h1><p>Your Google Calendar has been linked. You can close this tab and return to OptiNotch.</p></div></body></html>";
-                            let response = tiny_http::Response::from_string(html)
-                                .with_header(
-                                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
-                                        .unwrap(),
-                                );
+                            let response = tiny_http::Response::from_string(html).with_header(
+                                tiny_http::Header::from_bytes(
+                                    &b"Content-Type"[..],
+                                    &b"text/html; charset=utf-8"[..],
+                                )
+                                .unwrap(),
+                            );
                             let _ = request.respond(response);
 
                             // Exchange code for tokens
@@ -259,9 +259,13 @@ fn perform_sync(state: &Arc<Mutex<GoogleSyncState>>, tokens_path: &PathBuf, conf
         // If access token is expired (or expires in < 120s), refresh it
         if t.expires_at <= now_secs + 120 {
             if let Some(ref refresh_tok) = t.refresh_token {
-                if let Ok(new_tokens) = refresh_access_token(refresh_tok, client_id, client_secret) {
+                if let Ok(new_tokens) = refresh_access_token(refresh_tok, client_id, client_secret)
+                {
                     *t = new_tokens.clone();
-                    let _ = fs::write(tokens_path, serde_json::to_string_pretty(&new_tokens).unwrap_or_default());
+                    let _ = fs::write(
+                        tokens_path,
+                        serde_json::to_string_pretty(&new_tokens).unwrap_or_default(),
+                    );
                 }
             }
         }
@@ -270,9 +274,13 @@ fn perform_sync(state: &Arc<Mutex<GoogleSyncState>>, tokens_path: &PathBuf, conf
         if !is_ok {
             // Token might be invalid/expired, try force refresh and retry once
             if let Some(ref refresh_tok) = t.refresh_token {
-                if let Ok(new_tokens) = refresh_access_token(refresh_tok, client_id, client_secret) {
+                if let Ok(new_tokens) = refresh_access_token(refresh_tok, client_id, client_secret)
+                {
                     *t = new_tokens.clone();
-                    let _ = fs::write(tokens_path, serde_json::to_string_pretty(&new_tokens).unwrap_or_default());
+                    let _ = fs::write(
+                        tokens_path,
+                        serde_json::to_string_pretty(&new_tokens).unwrap_or_default(),
+                    );
                     sync_google_rest_api(state, &t.access_token);
                 }
             }
@@ -295,8 +303,8 @@ fn sync_google_rest_api(state: &Arc<Mutex<GoogleSyncState>>, access_token: &str)
     let time_min = format!("{:04}-01-01T00:00:00Z", start_year);
     let time_max = format!("{:04}-12-31T23:59:59Z", end_year);
 
-    let default_calendar_color = fetch_calendar_default_color(&client, access_token)
-        .unwrap_or((59, 130, 246)); // Default Google Blue
+    let default_calendar_color =
+        fetch_calendar_default_color(&client, access_token).unwrap_or((59, 130, 246)); // Default Google Blue
 
     let url = format!("{}/calendars/primary/events", GOOGLE_CALENDAR_API);
 
@@ -318,7 +326,8 @@ fn sync_google_rest_api(state: &Arc<Mutex<GoogleSyncState>>, access_token: &str)
         if response.status().is_success() {
             if let Ok(json) = response.json::<serde_json::Value>() {
                 if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
-                    let mut new_events: HashMap<(u32, u32, u32), Vec<CalendarEvent>> = HashMap::new();
+                    let mut new_events: HashMap<(u32, u32, u32), Vec<CalendarEvent>> =
+                        HashMap::new();
 
                     for item in items {
                         let title = item
@@ -336,7 +345,8 @@ fn sync_google_rest_api(state: &Arc<Mutex<GoogleSyncState>>, access_token: &str)
                         let start = item.get("start");
                         let end = item.get("end");
 
-                        if let Some((y, m, d, time_str, is_all_day)) = parse_event_time(start, end) {
+                        if let Some((y, m, d, time_str, is_all_day)) = parse_event_time(start, end)
+                        {
                             let event = CalendarEvent {
                                 title,
                                 time_str,
@@ -378,7 +388,10 @@ fn sync_google_rest_api(state: &Arc<Mutex<GoogleSyncState>>, access_token: &str)
     success
 }
 
-fn fetch_calendar_default_color(client: &reqwest::blocking::Client, access_token: &str) -> Option<(u8, u8, u8)> {
+fn fetch_calendar_default_color(
+    client: &reqwest::blocking::Client,
+    access_token: &str,
+) -> Option<(u8, u8, u8)> {
     let url = format!("{}/users/me/calendarList/primary", GOOGLE_CALENDAR_API);
     let res = client
         .get(&url)
@@ -409,18 +422,18 @@ fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
 
 fn parse_event_color_id(color_id: &str) -> (u8, u8, u8) {
     match color_id {
-        "1" => (121, 134, 203),  // Lavender
-        "2" => (51, 182, 121),   // Sage
-        "3" => (142, 36, 170),   // Grape
-        "4" => (230, 124, 115),  // Flamingo
-        "5" => (246, 191, 38),   // Banana
-        "6" => (244, 81, 30),    // Tangerine
-        "7" => (3, 155, 229),    // Peacock
-        "8" => (63, 81, 181),    // Graphite
-        "9" => (57, 73, 171),    // Blueberry
-        "10" => (11, 128, 67),   // Basil
-        "11" => (213, 0, 0),     // Tomato
-        _ => (59, 130, 246),     // Default Google Blue
+        "1" => (121, 134, 203), // Lavender
+        "2" => (51, 182, 121),  // Sage
+        "3" => (142, 36, 170),  // Grape
+        "4" => (230, 124, 115), // Flamingo
+        "5" => (246, 191, 38),  // Banana
+        "6" => (244, 81, 30),   // Tangerine
+        "7" => (3, 155, 229),   // Peacock
+        "8" => (63, 81, 181),   // Graphite
+        "9" => (57, 73, 171),   // Blueberry
+        "10" => (11, 128, 67),  // Basil
+        "11" => (213, 0, 0),    // Tomato
+        _ => (59, 130, 246),    // Default Google Blue
     }
 }
 
@@ -455,20 +468,35 @@ fn parse_event_time(
                 let time_part = &dt_str[11..16]; // "14:30"
                 let sh: u32 = time_part[0..2].parse().unwrap_or(0);
                 let sm: u32 = time_part[3..5].parse().unwrap_or(0);
-                let ampm = if sh >= 12 { "PM" } else { "AM" };
-                let h12 = if sh == 0 { 12 } else if sh > 12 { sh - 12 } else { sh };
-                let start_formatted = format!("{:02}:{:02} {}", h12, sm, ampm);
+                // let ampm = if sh >= 12 { "PM" } else { "AM" };
+                // let h12 = if sh == 0 {
+                //     12
+                // } else if sh > 12 {
+                //     sh - 12
+                // } else {
+                //     sh
+                // };
+                let start_formatted = format!("{:02}:{:02}", sh, sm);
 
                 let mut time_str = start_formatted;
 
-                if let Some(end_dt_str) = end_obj.and_then(|e| e.get("dateTime")).and_then(|d| d.as_str()) {
+                if let Some(end_dt_str) = end_obj
+                    .and_then(|e| e.get("dateTime"))
+                    .and_then(|d| d.as_str())
+                {
                     if end_dt_str.len() >= 16 {
                         let end_time_part = &end_dt_str[11..16];
                         let eh: u32 = end_time_part[0..2].parse().unwrap_or(0);
                         let em: u32 = end_time_part[3..5].parse().unwrap_or(0);
-                        let e_ampm = if eh >= 12 { "PM" } else { "AM" };
-                        let eh12 = if eh == 0 { 12 } else if eh > 12 { eh - 12 } else { eh };
-                        time_str = format!("{} - {:02}:{:02} {}", time_str, eh12, em, e_ampm);
+                        // let e_ampm = if eh >= 12 { "PM" } else { "AM" };
+                        // let eh12 = if eh == 0 {
+                        //     12
+                        // } else if eh > 12 {
+                        //     eh - 12
+                        // } else {
+                        //     eh
+                        // };
+                        time_str = format!("{} - {:02}:{:02}", time_str, eh, em);
                     }
                 }
 
