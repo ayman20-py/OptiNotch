@@ -468,15 +468,15 @@ fn parse_event_time(
                 let time_part = &dt_str[11..16]; // "14:30"
                 let sh: u32 = time_part[0..2].parse().unwrap_or(0);
                 let sm: u32 = time_part[3..5].parse().unwrap_or(0);
-                let ampm = if sh >= 12 { "PM" } else { "AM" };
-                let h12 = if sh == 0 {
-                    12
-                } else if sh > 12 {
-                    sh - 12
-                } else {
-                    sh
-                };
-                let start_formatted = format!("{:02}:{:02} {}", h12, sm, ampm);
+                // let ampm = if sh >= 12 { "PM" } else { "AM" };
+                // let h12 = if sh == 0 {
+                //     12
+                // } else if sh > 12 {
+                //     sh - 12
+                // } else {
+                //     sh
+                // };
+                let start_formatted = format!("{:02}:{:02}", sh, sm);
 
                 let mut time_str = start_formatted;
 
@@ -488,15 +488,15 @@ fn parse_event_time(
                         let end_time_part = &end_dt_str[11..16];
                         let eh: u32 = end_time_part[0..2].parse().unwrap_or(0);
                         let em: u32 = end_time_part[3..5].parse().unwrap_or(0);
-                        let e_ampm = if eh >= 12 { "PM" } else { "AM" };
-                        let eh12 = if eh == 0 {
-                            12
-                        } else if eh > 12 {
-                            eh - 12
-                        } else {
-                            eh
-                        };
-                        time_str = format!("{} - {:02}:{:02} {}", time_str, eh12, em, e_ampm);
+                        // let e_ampm = if eh >= 12 { "PM" } else { "AM" };
+                        // let eh12 = if eh == 0 {
+                        //     12
+                        // } else if eh > 12 {
+                        //     eh - 12
+                        // } else {
+                        //     eh
+                        // };
+                        time_str = format!("{} - {:02}:{:02}", time_str, eh, em);
                     }
                 }
 
