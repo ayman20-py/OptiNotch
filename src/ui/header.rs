@@ -1,9 +1,9 @@
 use crate::ui::font_cache::FontCache;
 use crate::ui::system_status::{BatteryStatus, VolumeStatus};
-use crate::window::state::ButtonAnimations;
 use crate::window::NotchController;
+use crate::window::state::ButtonAnimations;
 use skia_safe::{
-    font::Edging, Canvas, Color, Font, Paint, PaintStyle, PathBuilder, Point, RRect, Rect,
+    Canvas, Color, Font, Paint, PaintStyle, PathBuilder, Point, RRect, Rect, font::Edging,
 };
 
 pub fn draw_header_system_bar(
@@ -109,7 +109,12 @@ fn draw_modern_monitor_button(
 
     let mon_w_box = 13.0 * s;
     let mon_h_box = 9.0 * s;
-    let mon_rect = Rect::from_xywh(-pill_w / 2.0 + (6.0 * s), -mon_h_box / 2.0 - (1.0 * s), mon_w_box, mon_h_box);
+    let mon_rect = Rect::from_xywh(
+        -pill_w / 2.0 + (6.0 * s),
+        -mon_h_box / 2.0 - (1.0 * s),
+        mon_w_box,
+        mon_h_box,
+    );
     let mon_rrect = RRect::new_rect_xy(mon_rect, 1.8 * s, 1.8 * s);
     canvas.draw_rrect(mon_rrect, &mon_paint);
 
@@ -117,14 +122,27 @@ fn draw_modern_monitor_button(
     let mut screen_bg = Paint::default();
     screen_bg.set_anti_alias(true);
     screen_bg.set_color(Color::from_argb(140, 59, 130, 246)); // Glowing blue screen
-    let inner_rect = Rect::from_xywh(mon_rect.left + (1.2 * s), mon_rect.top + (1.2 * s), mon_w_box - (2.4 * s), mon_h_box - (2.4 * s));
+    let inner_rect = Rect::from_xywh(
+        mon_rect.left + (1.2 * s),
+        mon_rect.top + (1.2 * s),
+        mon_w_box - (2.4 * s),
+        mon_h_box - (2.4 * s),
+    );
     canvas.draw_rrect(RRect::new_rect_xy(inner_rect, 1.0 * s, 1.0 * s), &screen_bg);
 
     // Stand base
     let stand_cx = mon_rect.left + (mon_w_box / 2.0);
     let stand_top = mon_rect.bottom;
-    canvas.draw_line((stand_cx, stand_top), (stand_cx, stand_top + (2.0 * s)), &mon_paint);
-    canvas.draw_line((stand_cx - (2.5 * s), stand_top + (2.0 * s)), (stand_cx + (2.5 * s), stand_top + (2.0 * s)), &mon_paint);
+    canvas.draw_line(
+        (stand_cx, stand_top),
+        (stand_cx, stand_top + (2.0 * s)),
+        &mon_paint,
+    );
+    canvas.draw_line(
+        (stand_cx - (2.5 * s), stand_top + (2.0 * s)),
+        (stand_cx + (2.5 * s), stand_top + (2.0 * s)),
+        &mon_paint,
+    );
 
     // 4. Display Number Badge
     let fonts = FontCache::get();
@@ -147,7 +165,13 @@ fn draw_modern_monitor_button(
 }
 
 /// Live Volume Capsule with dynamic speaker sound waves
-fn draw_volume_status(canvas: &Canvas, right_x: f32, cy: f32, s: f32, volume: &VolumeStatus) -> f32 {
+fn draw_volume_status(
+    canvas: &Canvas,
+    right_x: f32,
+    cy: f32,
+    s: f32,
+    volume: &VolumeStatus,
+) -> f32 {
     let fonts = FontCache::get();
     let mut vol_font = Font::new(fonts.regular.clone(), 9.5 * s);
     vol_font.set_subpixel(true);
@@ -170,7 +194,12 @@ fn draw_volume_status(canvas: &Canvas, right_x: f32, cy: f32, s: f32, volume: &V
     let (text_w, _) = vol_font.measure_str(&vol_text, Some(&text_paint));
     let capsule_w = text_w + (28.0 * s);
     let capsule_h = 22.0 * s;
-    let capsule_rect = Rect::from_xywh(right_x - capsule_w, cy - (capsule_h / 2.0), capsule_w, capsule_h);
+    let capsule_rect = Rect::from_xywh(
+        right_x - capsule_w,
+        cy - (capsule_h / 2.0),
+        capsule_w,
+        capsule_h,
+    );
     let capsule_rrect = RRect::new_rect_xy(capsule_rect, 7.0 * s, 7.0 * s);
 
     // Glass Background
@@ -219,48 +248,6 @@ fn draw_volume_status(canvas: &Canvas, right_x: f32, cy: f32, s: f32, volume: &V
         x_paint.set_style(PaintStyle::Stroke);
         x_paint.set_stroke_width(1.2 * s);
         x_paint.set_color(Color::from_argb(240, 239, 68, 68));
-
-        let cross_cx = icon_left + (10.5 * s);
-        let cross_sz = 3.0 * s;
-        canvas.draw_line((cross_cx - cross_sz, cy - cross_sz), (cross_cx + cross_sz, cy + cross_sz), &x_paint);
-        canvas.draw_line((cross_cx + cross_sz, cy - cross_sz), (cross_cx - cross_sz, cy + cross_sz), &x_paint);
-    } else {
-        let mut wave_paint = Paint::default();
-        wave_paint.set_anti_alias(true);
-        wave_paint.set_style(PaintStyle::Stroke);
-        wave_paint.set_stroke_width(1.1 * s);
-        wave_paint.set_color(Color::from_argb(210, 255, 255, 255));
-
-        // Wave 1 (Low)
-        if volume.percentage > 0 {
-            let mut w1 = PathBuilder::new();
-            w1.add_arc(
-                Rect::from_xywh(icon_left + (4.0 * s), cy - (2.5 * s), 5.0 * s, 5.0 * s),
-                -45.0,
-                90.0,
-            );
-            canvas.draw_path(&w1.detach(), &wave_paint);
-        }
-        // Wave 2 (Medium)
-        if volume.percentage >= 34 {
-            let mut w2 = PathBuilder::new();
-            w2.add_arc(
-                Rect::from_xywh(icon_left + (4.0 * s), cy - (4.5 * s), 9.0 * s, 9.0 * s),
-                -45.0,
-                90.0,
-            );
-            canvas.draw_path(&w2.detach(), &wave_paint);
-        }
-        // Wave 3 (High)
-        if volume.percentage >= 67 {
-            let mut w3 = PathBuilder::new();
-            w3.add_arc(
-                Rect::from_xywh(icon_left + (4.0 * s), cy - (6.5 * s), 13.0 * s, 13.0 * s),
-                -45.0,
-                90.0,
-            );
-            canvas.draw_path(&w3.detach(), &wave_paint);
-        }
     }
 
     // Text Label
@@ -273,7 +260,13 @@ fn draw_volume_status(canvas: &Canvas, right_x: f32, cy: f32, s: f32, volume: &V
 }
 
 /// Battery Status Capsule with dynamic level fill & charging indicator
-fn draw_battery_status(canvas: &Canvas, right_x: f32, cy: f32, s: f32, battery: &BatteryStatus) -> f32 {
+fn draw_battery_status(
+    canvas: &Canvas,
+    right_x: f32,
+    cy: f32,
+    s: f32,
+    battery: &BatteryStatus,
+) -> f32 {
     let fonts = FontCache::get();
     let mut bat_font = Font::new(fonts.regular.clone(), 9.5 * s);
     bat_font.set_subpixel(true);
@@ -294,7 +287,12 @@ fn draw_battery_status(canvas: &Canvas, right_x: f32, cy: f32, s: f32, battery: 
     let (text_w, _) = bat_font.measure_str(&bat_text, Some(&text_paint));
     let capsule_w = text_w + (28.0 * s);
     let capsule_h = 22.0 * s;
-    let capsule_rect = Rect::from_xywh(right_x - capsule_w, cy - (capsule_h / 2.0), capsule_w, capsule_h);
+    let capsule_rect = Rect::from_xywh(
+        right_x - capsule_w,
+        cy - (capsule_h / 2.0),
+        capsule_w,
+        capsule_h,
+    );
     let capsule_rrect = RRect::new_rect_xy(capsule_rect, 7.0 * s, 7.0 * s);
 
     // Glass Background (emerald tint if charging)
