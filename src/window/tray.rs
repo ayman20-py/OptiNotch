@@ -10,6 +10,7 @@ pub const IDM_TOGGLE: usize = 1001;
 pub const IDM_CHECK_UPDATES: usize = 1002;
 pub const IDM_EXIT: usize = 1003;
 pub const IDM_AUTOSTART: usize = 1004;
+pub const IDM_SETTINGS: usize = 1005;
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -146,6 +147,7 @@ impl TrayIcon {
             let hmenu = CreatePopupMenu();
             let version_label = format!("OptiNotch v{}", crate::updater::CURRENT_VERSION);
             let version_text = to_wide(&version_label);
+            let settings_text = to_wide("Settings...");
             let autostart_text = to_wide("Start with Windows");
             let update_text = to_wide("Check for Updates...");
             let exit_text = to_wide("Exit OptiNotch");
@@ -156,6 +158,7 @@ impl TrayIcon {
             // Header (disabled)
             AppendMenuW(hmenu, MF_GRAYED | MF_DISABLED, 0, version_text.as_ptr());
             AppendMenuW(hmenu, MF_SEPARATOR, 0, null());
+            AppendMenuW(hmenu, MF_STRING, IDM_SETTINGS, settings_text.as_ptr());
             AppendMenuW(hmenu, autostart_flags, IDM_AUTOSTART, autostart_text.as_ptr());
             AppendMenuW(hmenu, MF_STRING, IDM_CHECK_UPDATES, update_text.as_ptr());
             AppendMenuW(hmenu, MF_SEPARATOR, 0, null());

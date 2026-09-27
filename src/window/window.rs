@@ -10,7 +10,9 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::state::{MediaAction, NotchController, NotchState};
-use super::tray::{IDM_AUTOSTART, IDM_CHECK_UPDATES, IDM_EXIT, IDM_TOGGLE, WM_TRAY_ICON};
+use super::tray::{
+    IDM_AUTOSTART, IDM_CHECK_UPDATES, IDM_EXIT, IDM_SETTINGS, IDM_TOGGLE, WM_TRAY_ICON,
+};
 
 const HOTKEY_TOGGLE_ID: i32 = 1001;
 
@@ -226,6 +228,12 @@ pub unsafe extern "system" fn wnd_proc(
                         MediaAction::SkipPrevious => {
                             MEDIA_PREV_FLAG.store(true, Ordering::SeqCst);
                         }
+                        MediaAction::OpenSettings => {
+                            let controller_mut =
+                                unsafe { &mut *(controller_ptr as *mut NotchController) };
+                            controller_mut.trigger_settings_press();
+                            crate::ui::settings::open_settings_window();
+                        }
                         MediaAction::SwitchMonitor => {
                             SWITCH_MONITOR_FLAG.store(true, Ordering::SeqCst);
                         }
@@ -343,6 +351,8 @@ pub unsafe extern "system" fn wnd_proc(
             } else if cmd_id == IDM_AUTOSTART {
                 let enabled = crate::autostart::is_autostart_enabled();
                 let _ = crate::autostart::set_autostart(!enabled);
+            } else if cmd_id == IDM_SETTINGS {
+                crate::ui::settings::open_settings_window();
             } else if cmd_id == IDM_CHECK_UPDATES {
                 CHECK_UPDATES_FLAG.store(true, Ordering::SeqCst);
             } else if cmd_id == IDM_EXIT {

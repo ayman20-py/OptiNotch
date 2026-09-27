@@ -20,7 +20,13 @@ pub fn draw_header_system_bar(
     let mut right_cursor = pill_x + current_w - (16.0 * s);
     let cy = pill_y + (22.0 * s);
 
-    // 1. Redesigned Modern Monitor Switch Button (Rightmost)
+    // 1. Modern Settings Gear Button (Far Rightmost)
+    let set_w = 26.0 * s;
+    let set_cx = right_cursor - (set_w / 2.0);
+    draw_modern_settings_button(canvas, set_cx, cy, s, &controller.btn_anims);
+    right_cursor -= set_w + (6.0 * s);
+
+    // 2. Redesigned Modern Monitor Switch Button (Left of Settings Button)
     let mon_w = 38.0 * s;
     let mon_cx = right_cursor - (mon_w / 2.0);
     draw_modern_monitor_button(
@@ -33,14 +39,121 @@ pub fn draw_header_system_bar(
     );
     right_cursor -= mon_w + (6.0 * s);
 
-    // 2. Live Volume Capsule
+    // 3. Live Volume Capsule
     let vol_w = draw_volume_status(canvas, right_cursor, cy, s, volume);
     right_cursor -= vol_w + (6.0 * s);
 
-    // 3. Battery Capsule (Only shown on devices with batteries)
+    // 4. Battery Capsule (Only shown on devices with batteries)
     if battery.has_battery {
         draw_battery_status(canvas, right_cursor, cy, s, battery);
     }
+}
+
+/// Modern Settings Gear Button with tactile micro-effects
+fn draw_modern_settings_button(
+    canvas: &Canvas,
+    cx: f32,
+    cy: f32,
+    s: f32,
+    anims: &ButtonAnimations,
+) {
+    let scale = anims.settings_scale.current;
+    let glow = anims.settings_glow.current.clamp(0.0, 1.0);
+    let rot = anims.settings_rotate.current;
+
+    canvas.save();
+    canvas.translate((cx, cy));
+    canvas.scale((scale, scale));
+    if rot.abs() > 0.01 {
+        canvas.rotate(rot, Some(Point::new(0.0, 0.0)));
+    }
+
+    let pill_w = 26.0 * s;
+    let pill_h = 22.0 * s;
+    let pill_rect = Rect::from_xywh(-pill_w / 2.0, -pill_h / 2.0, pill_w, pill_h);
+    let pill_rrect = RRect::new_rect_xy(pill_rect, 7.0 * s, 7.0 * s);
+
+    // 1. Dynamic Glow Halo on Click
+    if glow > 0.01 {
+        let mut glow_paint = Paint::default();
+        glow_paint.set_anti_alias(true);
+        glow_paint.set_style(PaintStyle::Stroke);
+        glow_paint.set_stroke_width(2.0 * s);
+        let alpha = (glow * 180.0) as u8;
+        glow_paint.set_color(Color::from_argb(alpha, 168, 85, 247)); // Glowing purple accent
+        let halo_expand = (1.0 - glow) * 4.0 * s;
+        let halo_rect = Rect::from_xywh(
+            -pill_w / 2.0 - halo_expand,
+            -pill_h / 2.0 - halo_expand,
+            pill_w + (halo_expand * 2.0),
+            pill_h + (halo_expand * 2.0),
+        );
+        let halo_rrect = RRect::new_rect_xy(halo_rect, 8.0 * s, 8.0 * s);
+        canvas.draw_rrect(halo_rrect, &glow_paint);
+    }
+
+    // 2. Translucent Glass Capsule Fill
+    let mut bg_paint = Paint::default();
+    bg_paint.set_anti_alias(true);
+    bg_paint.set_color(Color::from_argb(28, 255, 255, 255));
+    canvas.draw_rrect(pill_rrect, &bg_paint);
+
+    let mut border_paint = Paint::default();
+    border_paint.set_anti_alias(true);
+    border_paint.set_style(PaintStyle::Stroke);
+    border_paint.set_stroke_width(1.0);
+    border_paint.set_color(Color::from_argb(45, 255, 255, 255));
+    canvas.draw_rrect(pill_rrect, &border_paint);
+
+    // 3. Authentic Vector Gear/Cog Icon
+    let mut gear_builder = PathBuilder::new();
+
+    // Outer teeth outline with 6 trapezoidal cogs
+    let num_teeth = 6;
+    for i in 0..num_teeth {
+        let base_deg = (i as f32) * (360.0 / num_teeth as f32);
+
+        // 1. Root start
+        let a1 = (base_deg - 14.0).to_radians();
+        let p1 = Point::new(a1.cos() * (3.8 * s), a1.sin() * (3.8 * s));
+
+        // 2. Tip start
+        let a2 = (base_deg - 7.0).to_radians();
+        let p2 = Point::new(a2.cos() * (5.5 * s), a2.sin() * (5.5 * s));
+
+        // 3. Tip end
+        let a3 = (base_deg + 7.0).to_radians();
+        let p3 = Point::new(a3.cos() * (5.5 * s), a3.sin() * (5.5 * s));
+
+        // 4. Root end
+        let a4 = (base_deg + 14.0).to_radians();
+        let p4 = Point::new(a4.cos() * (3.8 * s), a4.sin() * (3.8 * s));
+
+        if i == 0 {
+            gear_builder.move_to(p1);
+        } else {
+            gear_builder.line_to(p1);
+        }
+        gear_builder.line_to(p2);
+        gear_builder.line_to(p3);
+        gear_builder.line_to(p4);
+    }
+    gear_builder.close();
+
+    // Center circular hole
+    gear_builder.add_circle((0.0, 0.0), 1.9 * s, skia_safe::PathDirection::CW);
+
+    let mut gear_path = gear_builder.detach();
+    gear_path.set_fill_type(skia_safe::PathFillType::EvenOdd);
+
+    let mut gear_fill = Paint::default();
+    gear_fill.set_anti_alias(true);
+    gear_fill.set_style(PaintStyle::Fill);
+    gear_fill.set_color(Color::from_argb(240, 255, 255, 255));
+
+    canvas.draw_path(&gear_path, &gear_fill);
+
+    canvas.restore();
 }
 
 /// Redesigned Modern Monitor Switch Pill Button with tactile micro-effects
@@ -242,7 +355,7 @@ fn draw_volume_status(
 
     // Sound Wave Arcs or Mute Strike
     if volume.is_muted || volume.percentage == 0 {
-        // Red Mute Strike (✕)
+        // Making the sound icon red
         let mut x_paint = Paint::default();
         x_paint.set_anti_alias(true);
         x_paint.set_style(PaintStyle::Stroke);

@@ -12,6 +12,7 @@ pub enum MediaAction {
     TogglePlayPause,
     SkipNext,
     SkipPrevious,
+    OpenSettings,
     SwitchMonitor,
     CalendarSelectDay(usize),
     CalendarPrevWeek,
@@ -118,6 +119,9 @@ pub struct ButtonAnimations {
     pub monitor_scale: Spring,
     pub monitor_glow: Spring,
     pub monitor_rotate: Spring,
+    pub settings_scale: Spring,
+    pub settings_glow: Spring,
+    pub settings_rotate: Spring,
 }
 
 impl ButtonAnimations {
@@ -132,6 +136,9 @@ impl ButtonAnimations {
             monitor_scale: Spring::new(1.0, 520.0, 26.0),
             monitor_glow: Spring::new(0.0, 380.0, 24.0),
             monitor_rotate: Spring::new(0.0, 440.0, 22.0),
+            settings_scale: Spring::new(1.0, 520.0, 26.0),
+            settings_glow: Spring::new(0.0, 380.0, 24.0),
+            settings_rotate: Spring::new(0.0, 440.0, 22.0),
         }
     }
 
@@ -145,8 +152,11 @@ impl ButtonAnimations {
         let a7 = self.monitor_scale.update(dt);
         let a8 = self.monitor_glow.update(dt);
         let a9 = self.monitor_rotate.update(dt);
+        let a10 = self.settings_scale.update(dt);
+        let a11 = self.settings_glow.update(dt);
+        let a12 = self.settings_rotate.update(dt);
 
-        a1 || a2 || a3 || a4 || a5 || a6 || a7 || a8 || a9
+        a1 || a2 || a3 || a4 || a5 || a6 || a7 || a8 || a9 || a10 || a11 || a12
     }
 }
 
@@ -225,7 +235,9 @@ impl NotchController {
     /// Trigger micro-click animations
     pub fn trigger_play_press(&mut self, is_playing: bool) {
         self.btn_anims.play_scale.current = 0.78;
-        self.btn_anims.play_morph.set_target(if is_playing { 1.0 } else { 0.0 });
+        self.btn_anims
+            .play_morph
+            .set_target(if is_playing { 1.0 } else { 0.0 });
         self.is_animating = true;
         self.last_frame_time = Some(Instant::now());
     }
@@ -248,6 +260,14 @@ impl NotchController {
         self.btn_anims.monitor_scale.current = 0.70;
         self.btn_anims.monitor_glow.current = 1.0;
         self.btn_anims.monitor_rotate.current = 14.0;
+        self.is_animating = true;
+        self.last_frame_time = Some(Instant::now());
+    }
+
+    pub fn trigger_settings_press(&mut self) {
+        self.btn_anims.settings_scale.current = 0.70;
+        self.btn_anims.settings_glow.current = 1.0;
+        self.btn_anims.settings_rotate.current = 24.0;
         self.is_animating = true;
         self.last_frame_time = Some(Instant::now());
     }
@@ -289,8 +309,10 @@ impl NotchController {
     pub fn set_hidden(&mut self, hidden: bool) {
         if self.is_hidden != hidden {
             self.is_hidden = hidden;
-            self.opacity_spring.set_target(if hidden { 0.0 } else { 1.0 });
-            self.scale_spring.set_target(if hidden { 0.88 } else { 1.0 });
+            self.opacity_spring
+                .set_target(if hidden { 0.0 } else { 1.0 });
+            self.scale_spring
+                .set_target(if hidden { 0.88 } else { 1.0 });
             self.is_animating = true;
             self.last_frame_time = Some(Instant::now());
         }
@@ -315,7 +337,8 @@ impl NotchController {
         let btn_active = self.btn_anims.update(dt);
         let scroll_active = self.calendar.update_scroll(dt);
 
-        self.is_animating = w_active || h_active || op_active || sc_active || btn_active || scroll_active;
+        self.is_animating =
+            w_active || h_active || op_active || sc_active || btn_active || scroll_active;
         self.is_animating
     }
 
@@ -325,10 +348,19 @@ impl NotchController {
         let pill_x = (self.config.canvas_width - cur_w) / 2.0;
         let pill_y = 0.0;
 
-        local_x >= pill_x && local_x <= pill_x + cur_w && local_y >= pill_y && local_y <= pill_y + cur_h
+        local_x >= pill_x
+            && local_x <= pill_x + cur_w
+            && local_y >= pill_y
+            && local_y <= pill_y + cur_h
     }
 
-    pub fn is_inside_screen_rect(&self, window_x: i32, window_y: i32, screen_x: i32, screen_y: i32) -> bool {
+    pub fn is_inside_screen_rect(
+        &self,
+        window_x: i32,
+        window_y: i32,
+        screen_x: i32,
+        screen_y: i32,
+    ) -> bool {
         let local_x = (screen_x - window_x) as f32;
         let local_y = (screen_y - window_y) as f32;
         self.is_inside_pill(local_x, local_y)
@@ -345,10 +377,25 @@ impl NotchController {
         let pill_x = (self.config.canvas_width - current_w) / 2.0;
         let pill_y = 0.0;
 
-        // 1. Check Header Monitor Switch Button (Top Right)
-        let mon_btn_w = 44.0 * scale;
+        // 1. Check Header Settings Button (Far Right)
+        let settings_btn_w = 30.0 * scale;
+        let settings_btn_h = 28.0 * scale;
+        let settings_btn_x = pill_x + current_w - (16.0 * scale) - settings_btn_w;
+        let settings_btn_y = pill_y + (8.0 * scale);
+        let settings_rect = skia_safe::Rect::from_xywh(
+            settings_btn_x,
+            settings_btn_y,
+            settings_btn_w,
+            settings_btn_h,
+        );
+        if settings_rect.contains(skia_safe::Point::new(local_x, local_y)) {
+            return MediaAction::OpenSettings;
+        }
+
+        // 2. Check Header Monitor Switch Button (Left of Settings Button)
+        let mon_btn_w = 42.0 * scale;
         let mon_btn_h = 28.0 * scale;
-        let mon_btn_x = pill_x + current_w - (56.0 * scale);
+        let mon_btn_x = settings_btn_x - (6.0 * scale) - mon_btn_w;
         let mon_btn_y = pill_y + (8.0 * scale);
         let mon_rect = skia_safe::Rect::from_xywh(mon_btn_x, mon_btn_y, mon_btn_w, mon_btn_h);
         if mon_rect.contains(skia_safe::Point::new(local_x, local_y)) {
@@ -373,7 +420,9 @@ impl NotchController {
             &self.calendar,
         );
         match cal_layout.hit_test(local_x, local_y, self.calendar.view_mode) {
-            crate::ui::calendar::CalendarAction::SelectDay(idx) => MediaAction::CalendarSelectDay(idx),
+            crate::ui::calendar::CalendarAction::SelectDay(idx) => {
+                MediaAction::CalendarSelectDay(idx)
+            }
             crate::ui::calendar::CalendarAction::PrevWeek => MediaAction::CalendarPrevWeek,
             crate::ui::calendar::CalendarAction::NextWeek => MediaAction::CalendarNextWeek,
             crate::ui::calendar::CalendarAction::OpenMonthPicker => {
@@ -387,7 +436,9 @@ impl NotchController {
             crate::ui::calendar::CalendarAction::SelectPickerDate { year, month, day } => {
                 MediaAction::CalendarSelectPickerDate { year, month, day }
             }
-            crate::ui::calendar::CalendarAction::ConnectGoogle => MediaAction::CalendarConnectGoogle,
+            crate::ui::calendar::CalendarAction::ConnectGoogle => {
+                MediaAction::CalendarConnectGoogle
+            }
             crate::ui::calendar::CalendarAction::None => MediaAction::None,
         }
     }
