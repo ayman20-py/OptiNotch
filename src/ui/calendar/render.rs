@@ -337,10 +337,16 @@ pub fn draw_calendar(
                             &title_paint,
                         );
 
-                        // Event Time / Duration
+                        // Event Time / Duration & Calendar Name
                         let time_y = title_y + (14.0 * s);
+                        let time_display = match &event.calendar_name {
+                            Some(name) if !name.is_empty() && name != "Primary" => {
+                                format!("{} • {}", event.time_str, name)
+                            }
+                            _ => event.time_str.clone(),
+                        };
                         canvas.draw_str(
-                            &event.time_str,
+                            &time_display,
                             (title_x, time_y),
                             &event_time_font,
                             &time_paint,

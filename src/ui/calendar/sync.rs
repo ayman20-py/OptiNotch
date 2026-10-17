@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::model::CalendarEvent;
+use super::model::{CalendarEvent, CalendarInfo};
 
 static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 
@@ -49,6 +49,12 @@ pub struct GoogleCalendarConfig {
     pub client_secret: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CalendarPreferences {
+    pub selected_calendars: HashMap<String, bool>,
+    pub cached_calendars: Vec<CalendarInfo>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GoogleSyncState {
     pub is_authenticated: bool,
@@ -57,6 +63,42 @@ pub struct GoogleSyncState {
     pub sync_token: Option<String>,
     pub account_email: Option<String>,
     pub events: HashMap<(u32, u32, u32), Vec<CalendarEvent>>, // (Y, M, D) -> Events
+}
+
+pub fn get_preferences_path() -> PathBuf {
+    get_app_data_dir().join("calendar_preferences.json")
+}
+
+pub fn load_calendar_preferences() -> CalendarPreferences {
+    let path = get_preferences_path();
+    if let Ok(content) = fs::read_to_string(&path) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        CalendarPreferences::default()
+    }
+}
+
+pub fn save_calendar_preferences(prefs: &CalendarPreferences) {
+    let path = get_preferences_path();
+    let _ = fs::create_dir_all(get_app_data_dir());
+    let _ = fs::write(&path, serde_json::to_string_pretty(prefs).unwrap_or_default());
+}
+
+pub fn set_calendar_enabled(calendar_id: &str, enabled: bool) {
+    let mut prefs = load_calendar_preferences();
+    prefs.selected_calendars.insert(calendar_id.to_string(), enabled);
+    for item in &mut prefs.cached_calendars {
+        if item.id == calendar_id {
+            item.enabled = enabled;
+        }
+    }
+    save_calendar_preferences(&prefs);
+}
+
+static GLOBAL_SYNC_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+pub fn request_global_sync() {
+    GLOBAL_SYNC_REQUESTED.store(true, Ordering::SeqCst);
 }
 
 pub struct GoogleCalendarService {
@@ -122,6 +164,13 @@ impl GoogleCalendarService {
         thread::spawn(move || {
             perform_sync(&state, &tokens_path, &config_path);
         });
+    }
+
+    /// Check if external trigger (like settings toggle) requested a sync
+    pub fn check_and_handle_global_sync(&self) {
+        if GLOBAL_SYNC_REQUESTED.swap(false, Ordering::SeqCst) {
+            self.request_sync();
+        }
     }
 
     /// Start direct Google OAuth 2.0 PKCE / loopback browser authentication
@@ -296,88 +345,137 @@ fn sync_google_rest_api(state: &Arc<Mutex<GoogleSyncState>>, access_token: &str)
 
     let client = get_http_client();
 
-    // Query primary calendar events for current active multi-year window
+    // 1. Discover all sub-calendars via /users/me/calendarList
+    let mut prefs = load_calendar_preferences();
+    let discovered_calendars = fetch_user_calendar_list(client, access_token);
+
+    if !discovered_calendars.is_empty() {
+        // Merge discovered calendars into preferences, preserving user toggle selections
+        let mut updated_cached: Vec<CalendarInfo> = Vec::new();
+        for mut cal in discovered_calendars {
+            let is_enabled = prefs
+                .selected_calendars
+                .get(&cal.id)
+                .copied()
+                .unwrap_or(cal.enabled);
+            cal.enabled = is_enabled;
+            prefs.selected_calendars.insert(cal.id.clone(), is_enabled);
+            updated_cached.push(cal);
+        }
+        prefs.cached_calendars = updated_cached;
+        save_calendar_preferences(&prefs);
+    }
+
+    // Filter calendars that user has enabled
+    let active_calendars: Vec<CalendarInfo> = prefs
+        .cached_calendars
+        .iter()
+        .filter(|c| c.enabled)
+        .cloned()
+        .collect();
+
+    // If cached calendars are empty (e.g. offline), fall back to primary
+    let calendars_to_fetch = if active_calendars.is_empty() {
+        vec![CalendarInfo {
+            id: "primary".to_string(),
+            summary: "Primary".to_string(),
+            description: None,
+            color_hex: "#3B82F6".to_string(),
+            is_primary: true,
+            enabled: true,
+        }]
+    } else {
+        active_calendars
+    };
+
+    // Query events for current active multi-year window
     let now_utc = chrono_lite_now();
     let start_year = now_utc.0.saturating_sub(1);
     let end_year = now_utc.0 + 2;
     let time_min = format!("{:04}-01-01T00:00:00Z", start_year);
     let time_max = format!("{:04}-12-31T23:59:59Z", end_year);
 
-    let default_calendar_color =
-        fetch_calendar_default_color(&client, access_token).unwrap_or((59, 130, 246)); // Default Google Blue
+    let mut new_events: HashMap<(u32, u32, u32), Vec<CalendarEvent>> = HashMap::new();
+    let mut any_success = false;
 
-    let url = format!("{}/calendars/primary/events", GOOGLE_CALENDAR_API);
+    for cal in &calendars_to_fetch {
+        let cal_color = parse_hex_color(&cal.color_hex).unwrap_or((59, 130, 246));
+        let url = format!(
+            "{}/calendars/{}/events",
+            GOOGLE_CALENDAR_API,
+            urlencoding::encode(&cal.id)
+        );
 
-    let res = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", access_token))
-        .query(&[
-            ("singleEvents", "true"),
-            ("orderBy", "startTime"),
-            ("timeMin", &time_min),
-            ("timeMax", &time_max),
-            ("maxResults", "2500"),
-        ])
-        .send();
+        let res = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .query(&[
+                ("singleEvents", "true"),
+                ("orderBy", "startTime"),
+                ("timeMin", &time_min),
+                ("timeMax", &time_max),
+                ("maxResults", "2500"),
+            ])
+            .send();
 
-    let mut success = false;
+        if let Ok(response) = res {
+            if response.status().is_success() {
+                any_success = true;
+                if let Ok(json) = response.json::<serde_json::Value>() {
+                    if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
+                        for item in items {
+                            let title = item
+                                .get("summary")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("(No title)")
+                                .to_string();
 
-    if let Ok(response) = res {
-        if response.status().is_success() {
-            if let Ok(json) = response.json::<serde_json::Value>() {
-                if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
-                    let mut new_events: HashMap<(u32, u32, u32), Vec<CalendarEvent>> =
-                        HashMap::new();
+                            let color_rgb = item
+                                .get("colorId")
+                                .and_then(|c| c.as_str())
+                                .map(parse_event_color_id)
+                                .unwrap_or(cal_color);
 
-                    for item in items {
-                        let title = item
-                            .get("summary")
-                            .and_then(|s| s.as_str())
-                            .unwrap_or("(No title)")
-                            .to_string();
+                            let start = item.get("start");
+                            let end = item.get("end");
 
-                        let color_rgb = item
-                            .get("colorId")
-                            .and_then(|c| c.as_str())
-                            .map(parse_event_color_id)
-                            .unwrap_or(default_calendar_color);
-
-                        let start = item.get("start");
-                        let end = item.get("end");
-
-                        if let Some((y, m, d, time_str, is_all_day)) = parse_event_time(start, end)
-                        {
-                            let event = CalendarEvent {
-                                title,
-                                time_str,
-                                color_rgb,
-                                is_all_day,
-                            };
-                            new_events.entry((y, m, d)).or_default().push(event);
+                            if let Some((y, m, d, time_str, is_all_day)) =
+                                parse_event_time(start, end)
+                            {
+                                let event = CalendarEvent {
+                                    title,
+                                    time_str,
+                                    color_rgb,
+                                    is_all_day,
+                                    calendar_name: Some(cal.summary.clone()),
+                                };
+                                new_events.entry((y, m, d)).or_default().push(event);
+                            }
                         }
                     }
-
-                    // Sort events on each day chronologically
-                    for day_events in new_events.values_mut() {
-                        day_events.sort_by(|a, b| {
-                            if a.is_all_day && !b.is_all_day {
-                                std::cmp::Ordering::Less
-                            } else if !a.is_all_day && b.is_all_day {
-                                std::cmp::Ordering::Greater
-                            } else {
-                                a.time_str.cmp(&b.time_str)
-                            }
-                        });
-                    }
-
-                    let mut s = state.lock().unwrap();
-                    s.events = new_events;
-                    s.is_authenticated = true;
-                    s.last_sync_time = Some(Instant::now());
-                    success = true;
                 }
             }
         }
+    }
+
+    if any_success {
+        // Sort events on each day chronologically
+        for day_events in new_events.values_mut() {
+            day_events.sort_by(|a, b| {
+                if a.is_all_day && !b.is_all_day {
+                    std::cmp::Ordering::Less
+                } else if !a.is_all_day && b.is_all_day {
+                    std::cmp::Ordering::Greater
+                } else {
+                    a.time_str.cmp(&b.time_str)
+                }
+            });
+        }
+
+        let mut s = state.lock().unwrap();
+        s.events = new_events;
+        s.is_authenticated = true;
+        s.last_sync_time = Some(Instant::now());
     }
 
     {
@@ -385,27 +483,67 @@ fn sync_google_rest_api(state: &Arc<Mutex<GoogleSyncState>>, access_token: &str)
         s.is_syncing = false;
     }
 
-    success
+    any_success
 }
 
-fn fetch_calendar_default_color(
+fn fetch_user_calendar_list(
     client: &reqwest::blocking::Client,
     access_token: &str,
-) -> Option<(u8, u8, u8)> {
-    let url = format!("{}/users/me/calendarList/primary", GOOGLE_CALENDAR_API);
+) -> Vec<CalendarInfo> {
+    let url = format!("{}/users/me/calendarList", GOOGLE_CALENDAR_API);
     let res = client
         .get(&url)
         .header("Authorization", format!("Bearer {}", access_token))
-        .send()
-        .ok()?;
+        .query(&[("minAccessRole", "reader")])
+        .send();
 
-    if res.status().is_success() {
-        let json = res.json::<serde_json::Value>().ok()?;
-        if let Some(bg_hex) = json.get("backgroundColor").and_then(|c| c.as_str()) {
-            return parse_hex_color(bg_hex);
+    let mut list = Vec::new();
+    if let Ok(response) = res {
+        if response.status().is_success() {
+            if let Ok(json) = response.json::<serde_json::Value>() {
+                if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
+                    for item in items {
+                        let id = match item.get("id").and_then(|v| v.as_str()) {
+                            Some(val) => val.to_string(),
+                            None => continue,
+                        };
+                        let summary = item
+                            .get("summary")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Untitled Calendar")
+                            .to_string();
+                        let description = item
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let color_hex = item
+                            .get("backgroundColor")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("#3B82F6")
+                            .to_string();
+                        let is_primary = item
+                            .get("primary")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let selected = item
+                            .get("selected")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
+
+                        list.push(CalendarInfo {
+                            id,
+                            summary,
+                            description,
+                            color_hex,
+                            is_primary,
+                            enabled: selected,
+                        });
+                    }
+                }
+            }
         }
     }
-    None
+    list
 }
 
 fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {

@@ -4,6 +4,18 @@ use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 
 use super::date_time_format::*;
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CalendarInfo {
+    pub id: String,
+    pub summary: String,
+    pub description: Option<String>,
+    pub color_hex: String,
+    pub is_primary: bool,
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct CalendarEvent {
@@ -11,6 +23,7 @@ pub struct CalendarEvent {
     pub time_str: String,
     pub color_rgb: (u8, u8, u8), // RGB accent bar
     pub is_all_day: bool,
+    pub calendar_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,12 +96,14 @@ impl CalendarState {
                     time_str: "All-day".to_string(),
                     color_rgb: (245, 158, 11), // Amber gold
                     is_all_day: true,
+                    calendar_name: None,
                 },
                 CalendarEvent {
                     title: "Final examination".to_string(),
                     time_str: "02:00 PM - 04:30 PM".to_string(),
                     color_rgb: (245, 158, 11),
                     is_all_day: false,
+                    calendar_name: None,
                 },
             ],
         );
@@ -102,12 +117,14 @@ impl CalendarState {
                     time_str: "10:00 AM - 11:00 AM".to_string(),
                     color_rgb: (59, 130, 246), // Blue
                     is_all_day: false,
+                    calendar_name: None,
                 },
                 CalendarEvent {
                     title: "Project OptiNotch v1.0 Launch".to_string(),
                     time_str: "04:00 PM".to_string(),
-                    color_rgb: (16, 185, 129), // Emerald Green
+                    color_rgb: (168, 85, 247), // Purple
                     is_all_day: false,
+                    calendar_name: None,
                 },
             ],
         );
@@ -120,6 +137,7 @@ impl CalendarState {
                 time_str: "03:00 PM - 04:00 PM".to_string(),
                 color_rgb: (168, 85, 247), // Purple
                 is_all_day: false,
+                calendar_name: None,
             }],
         );
 

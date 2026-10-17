@@ -102,7 +102,7 @@ const SETTINGS_HTML: &str = r#"<!DOCTYPE html>
   #content {
     flex: 1;
     background: #16161c;
-    padding: 28px 32px;
+    padding: 24px 28px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -126,50 +126,183 @@ const SETTINGS_HTML: &str = r#"<!DOCTYPE html>
   .tab-panel.active {
     display: flex;
   }
+
+  /* Calendar Settings Components */
+  .section-desc {
+    font-size: 13px;
+    color: #a1a1aa;
+    line-height: 1.5;
+  }
+  .calendar-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .cal-card {
+    background: #1e1e26;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .cal-card:hover {
+    background: #23232c;
+    border-color: rgba(255, 255, 255, 0.14);
+    transform: translateY(-1px);
+  }
+  .cal-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    overflow: hidden;
+  }
+  .cal-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+  }
+  .cal-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+  }
+  .cal-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cal-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #f4f4f5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cal-badge {
+    font-size: 10px;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+  }
+  .cal-desc {
+    font-size: 12px;
+    color: #71717a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Modern iOS / Fluent Style Switch Toggle */
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 42px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #2e2e38;
+    transition: .25s;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 2px;
+    bottom: 2px;
+    background-color: #e4e4e7;
+    transition: .25s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+  }
+  input:checked + .slider {
+    background-color: #2563eb;
+    border-color: #3b82f6;
+  }
+  input:checked + .slider:before {
+    transform: translateX(18px);
+    background-color: #ffffff;
+  }
+  .empty-state {
+    padding: 32px;
+    text-align: center;
+    color: #71717a;
+    font-size: 13.5px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+  }
 </style>
 </head>
 <body>
   <div id="sidebar">
-    <div class="sidebar-header">Settings</div>
-    <button class="nav-btn active" onclick="switchTab('general')">General</button>
-    <button class="nav-btn" onclick="switchTab('appearance')">Appearance</button>
-    <button class="nav-btn" onclick="switchTab('calendar')">Calendar</button>
-    <button class="nav-btn" onclick="switchTab('media')">Media</button>
-    <button class="nav-btn" onclick="switchTab('hotkeys')">Hotkeys</button>
-    <button class="nav-btn" onclick="switchTab('about')">About</button>
+    <div class="sidebar-header">⚙ Settings</div>
+    <button class="nav-btn active" onclick="switchTab('general')">📋 General</button>
+    <button class="nav-btn" onclick="switchTab('appearance')">🎨 Appearance</button>
+    <button class="nav-btn" onclick="switchTab('calendar')">📅 Calendar</button>
+    <button class="nav-btn" onclick="switchTab('media')">🎵 Media</button>
+    <button class="nav-btn" onclick="switchTab('hotkeys')">⌨ Hotkeys</button>
+    <button class="nav-btn" onclick="switchTab('about')">ℹ About</button>
   </div>
   <div id="content">
     <div id="tab-title" class="tab-title">General Settings</div>
     <div class="divider"></div>
-
+    
     <!-- Tab 0: General -->
     <div id="panel-general" class="tab-panel active">
-      <!-- General UI components go here -->
+      <p class="section-desc">Manage system startup, display modes, and notification behaviors.</p>
     </div>
 
     <!-- Tab 1: Appearance -->
     <div id="panel-appearance" class="tab-panel">
-      <!-- Appearance UI components go here -->
+      <p class="section-desc">Customize notch dimensions, blur effects, and animations.</p>
     </div>
 
     <!-- Tab 2: Calendar -->
     <div id="panel-calendar" class="tab-panel">
-      <!-- Calendar UI components go here -->
+      <p class="section-desc">Choose which Google sub-calendars and secondary schedules appear in your Notch agenda feed.</p>
+      
+      <div id="cal-container" class="calendar-list">
+        <div class="empty-state">Loading your sub-calendars...</div>
+      </div>
     </div>
 
     <!-- Tab 3: Media -->
     <div id="panel-media" class="tab-panel">
-      <!-- Media UI components go here -->
+      <p class="section-desc">Configure media players, playback shortcuts, and album artwork.</p>
     </div>
 
     <!-- Tab 4: Hotkeys -->
     <div id="panel-hotkeys" class="tab-panel">
-      <!-- Hotkeys UI components go here -->
+      <p class="section-desc">Configure keyboard shortcuts to expand, collapse, and toggle features.</p>
     </div>
 
     <!-- Tab 5: About -->
     <div id="panel-about" class="tab-panel">
-      <!-- About UI components go here -->
+      <p class="section-desc">OptiNotch v0.1.4 — Smooth, responsive dynamic notch for Windows.</p>
     </div>
   </div>
 
@@ -177,11 +310,12 @@ const SETTINGS_HTML: &str = r#"<!DOCTYPE html>
     const titles = {
       'general': 'General Settings',
       'appearance': 'Appearance',
-      'calendar': 'Calendar',
-      'media': 'Media',
+      'calendar': 'Calendar & Sub-Calendars',
+      'media': 'Media Controls',
       'hotkeys': 'Hotkeys & Shortcuts',
       'about': 'About OptiNotch'
     };
+
     function switchTab(name) {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -191,7 +325,103 @@ const SETTINGS_HTML: &str = r#"<!DOCTYPE html>
       const panel = document.getElementById('panel-' + name);
       if (panel) panel.classList.add('active');
       document.getElementById('tab-title').textContent = titles[name] || 'Settings';
+
+      if (name === 'calendar') {
+        requestCalendars();
+      }
     }
+
+    function requestCalendars() {
+      if (window.ipc) {
+        window.ipc.postMessage(JSON.stringify({ type: 'get_calendars' }));
+      }
+    }
+
+    function toggleCalendar(id, isChecked) {
+      if (window.ipc) {
+        window.ipc.postMessage(JSON.stringify({
+          type: 'toggle_calendar',
+          id: id,
+          enabled: isChecked
+        }));
+      }
+    }
+
+    window.renderCalendarList = function(calendars) {
+      const container = document.getElementById('cal-container');
+      if (!calendars || calendars.length === 0) {
+        container.innerHTML = '<div class="empty-state">No Google calendars discovered yet. Connect your account in the notch to view your calendars.</div>';
+        return;
+      }
+
+      container.innerHTML = '';
+      calendars.forEach(cal => {
+        const card = document.createElement('div');
+        card.className = 'cal-card';
+
+        const left = document.createElement('div');
+        left.className = 'cal-left';
+
+        const swatch = document.createElement('div');
+        swatch.className = 'cal-swatch';
+        swatch.style.backgroundColor = cal.color_hex || '#3b82f6';
+
+        const info = document.createElement('div');
+        info.className = 'cal-info';
+
+        const titleRow = document.createElement('div');
+        titleRow.className = 'cal-title-row';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'cal-name';
+        nameSpan.textContent = cal.summary || 'Untitled Calendar';
+        titleRow.appendChild(nameSpan);
+
+        if (cal.is_primary) {
+          const badge = document.createElement('span');
+          badge.className = 'cal-badge';
+          badge.textContent = 'Primary';
+          titleRow.appendChild(badge);
+        }
+
+        info.appendChild(titleRow);
+
+        if (cal.description) {
+          const desc = document.createElement('span');
+          desc.className = 'cal-desc';
+          desc.textContent = cal.description;
+          info.appendChild(desc);
+        }
+
+        left.appendChild(swatch);
+        left.appendChild(info);
+
+        const switchLabel = document.createElement('label');
+        switchLabel.className = 'switch';
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = !!cal.enabled;
+        input.onchange = function() {
+          toggleCalendar(cal.id, input.checked);
+        };
+
+        const slider = document.createElement('span');
+        slider.className = 'slider';
+
+        switchLabel.appendChild(input);
+        switchLabel.appendChild(slider);
+
+        card.appendChild(left);
+        card.appendChild(switchLabel);
+        container.appendChild(card);
+      });
+    };
+
+    // Auto-request calendars on initial load
+    window.addEventListener('DOMContentLoaded', () => {
+      requestCalendars();
+    });
   </script>
 </body>
 </html>"#;
@@ -310,6 +540,34 @@ fn run_settings_window_thread() {
                 size: Size::Physical(PhysicalSize::new(cw, ch)),
             })
             .with_html(SETTINGS_HTML)
+            .with_ipc_handler(|request| {
+                let body = request.body();
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                    let msg_type = json.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    match msg_type {
+                        "get_calendars" => {
+                            let prefs = crate::ui::calendar::sync::load_calendar_preferences();
+                            let calendars_json = serde_json::to_string(&prefs.cached_calendars)
+                                .unwrap_or_else(|_| "[]".to_string());
+                            let script = format!("window.renderCalendarList({});", calendars_json);
+                            if WEBVIEW_PTR != 0 {
+                                let wv = &*(WEBVIEW_PTR as *const WebView);
+                                let _ = wv.evaluate_script(&script);
+                            }
+                        }
+                        "toggle_calendar" => {
+                            if let (Some(id), Some(enabled)) = (
+                                json.get("id").and_then(|i| i.as_str()),
+                                json.get("enabled").and_then(|e| e.as_bool()),
+                            ) {
+                                crate::ui::calendar::sync::set_calendar_enabled(id, enabled);
+                                crate::ui::calendar::sync::request_global_sync();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            })
             .build_as_child(&handle_wrapper)
         {
             Ok(wv) => wv,

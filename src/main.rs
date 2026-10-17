@@ -103,6 +103,9 @@ fn main() {
                 SetTimer(notch.hwnd, TIMER_STATUS_ID, 60, None);
             }
 
+            // Check if settings or background actions requested a sync
+            calendar_service.check_and_handle_global_sync();
+
             // Sync latest Google Calendar events into controller
             let events = calendar_service.get_events();
             let is_connected = calendar_service.state.lock().unwrap().is_authenticated;
